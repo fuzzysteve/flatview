@@ -158,3 +158,22 @@ def test_rpc_service_is_ignored():
         root_type Req;
     """)
     assert s.root.name == "Req"
+
+
+def _crlf_copy(tmp_path):
+    for p in KITCHEN.glob("*.fbs"):
+        (tmp_path / p.name).write_bytes(p.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    return tmp_path / "kitchen.fbs"
+
+
+def test_crlf_line_endings_parse_identically(tmp_path, kitchen_schema):
+    # git on Windows checks .fbs files out with CRLF line endings
+    crlf = flatview.load_schema(_crlf_copy(tmp_path))
+    assert crlf["Ship"].documentation == [" A ship."]
+    assert normalise(crlf, True) == normalise(kitchen_schema, True)
+
+
+@needs_flatc
+def test_crlf_matches_flatc(tmp_path):
+    path = _crlf_copy(tmp_path)
+    assert normalise(flatview.load_schema(path)) == normalise(flatview.load_bfbs(flatc_bfbs(path)))

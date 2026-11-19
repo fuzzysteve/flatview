@@ -66,7 +66,7 @@ def _tokenize(text: str, filename: str) -> list[_Tok]:
             raise SchemaError(f"{filename}:{line}: unexpected character {text[pos]!r}")
         kind, val = m.lastgroup, m.group()
         if kind == "doc":
-            docs.append(val[3:])
+            docs.append(val[3:].rstrip("\r"))     # CRLF files: no trailing \r, as flatc
         elif kind not in ("ws", "comment"):
             toks.append(_Tok(kind, val, line, docs))
             docs = []
