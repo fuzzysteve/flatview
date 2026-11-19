@@ -290,3 +290,7 @@ rifter._asdict()                        # plain dicts/lists, recursively
 64-bit offsets/vectors (`offset64`, `vector64`), FlexBuffers (`flexbuffer`
 attribute), big-endian hosts are untested (all access is explicitly
 little-endian), and JSON-with-schema parsing in `.fbs` files.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
