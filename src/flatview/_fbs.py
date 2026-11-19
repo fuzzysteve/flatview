@@ -1098,8 +1098,8 @@ def _read_confined(real: str, roots: "_Roots") -> bytes:
     name the very same file (device and inode). Opening is non-blocking, so
     a FIFO cannot hang the parser, and only regular files are read.
     """
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0) \
-        | getattr(os, "O_BINARY", 0)
+    nonblock = getattr(os, "O_NONBLOCK", 0)          # POSIX only; Windows has no FIFOs to fear
+    flags = os.O_RDONLY | nonblock | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
     fd = os.open(real, flags)
     try:
         st = os.fstat(fd)
@@ -1116,7 +1116,9 @@ def _read_confined(real: str, roots: "_Roots") -> bytes:
                 raise _Unsafe("the file changed while it was being opened") from None
             if (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino) or os.path.realpath(real) != real:
                 raise _Unsafe("the file changed while it was being opened")
-        if hasattr(os, "set_blocking"):
+        if nonblock:
+            # Only undo what we set: on Windows set_blocking() works on pipes only
+            # and raises EINVAL ("The parameter is incorrect") on a regular file.
             os.set_blocking(fd, True)
         chunks, size = [], 0
         while size <= _MAX_SCHEMA_BYTES:

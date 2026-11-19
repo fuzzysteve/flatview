@@ -494,7 +494,8 @@ def _main(schemas, inc):
 def test_include_cannot_escape_schema_directory(secret_tree, inc):
     tmp, schemas = secret_tree
     (schemas / "link.fbs").symlink_to(tmp / "secret.txt")
-    p = _main(schemas, inc.format(abs=tmp / "secret.txt"))
+    # forward slashes: a raw Windows path would put "\\U..." escapes in the .fbs string
+    p = _main(schemas, inc.format(abs=(tmp / "secret.txt").as_posix()))
     with pytest.raises(SchemaError, match="refusing to include") as e:
         flatview.load_schema(p)
     assert SECRET not in str(e.value)
@@ -660,7 +661,7 @@ def test_include_directory_component_swapped(secret_tree, monkeypatch, include_m
     sub = schemas / "sub"
     def swap():
         os.rename(sub, schemas / "sub.orig")
-        os.symlink(outside, sub)
+        os.symlink(outside, sub, target_is_directory=True)
     fired = _swap_before_open(monkeypatch, sub / "deep.fbs", swap)
     with pytest.raises(SchemaError, match="refusing to include") as e:
         flatview.load_schema(_main(schemas, "sub/deep.fbs"))
@@ -755,21 +756,22 @@ def test_outside_include_never_touches_the_file_system(secret_tree, monkeypatch,
 def test_root_spelled_differently_from_opened_path(secret_tree, monkeypatch):
     # Models macOS: include_paths given in one spelling ("~/Schemas") while the
     # opened file's path comes back in another ("~/schemas"). Two symlink
-    # aliases of one directory play the two spellings.
+    # aliases of one directory play the two spellings. (Their names differ by
+    # more than case: on macOS/Windows "LibAlias" and "libalias" are one name.)
     tmp, schemas = secret_tree
     lib = tmp / "lib"
     lib.mkdir()
     (lib / "lib.fbs").write_text("table Lib { v: int; }\n")
-    os.symlink(lib, tmp / "LibAlias")
-    os.symlink(lib, tmp / "libalias")
-    monkeypatch.setattr(_fbs_mod, "_fd_path", lambda fd: str(tmp / "libalias" / "lib.fbs"))
-    s = flatview.load_schema(_main(schemas, "lib.fbs"), include_paths=[tmp / "LibAlias"])
+    os.symlink(lib, tmp / "alias-one", target_is_directory=True)
+    os.symlink(lib, tmp / "alias-two", target_is_directory=True)
+    monkeypatch.setattr(_fbs_mod, "_fd_path", lambda fd: str(tmp / "alias-two" / "lib.fbs"))
+    s = flatview.load_schema(_main(schemas, "lib.fbs"), include_paths=[tmp / "alias-one"])
     assert "Lib" in s.objects
 
 
 def test_main_schema_opened_through_symlinked_directory(secret_tree):
     tmp, schemas = secret_tree
-    os.symlink(schemas, tmp / "via-link")
+    os.symlink(schemas, tmp / "via-link", target_is_directory=True)
     _main(schemas, "common.fbs")
     assert "Common" in flatview.load_schema(tmp / "via-link" / "main.fbs").objects
 
