@@ -262,11 +262,15 @@ it's up to you:
   many times, so a few KB can describe millions of tables. The verifier
   rejects buffers that follow more offsets than `max_refs`. Raise it for
   trusted data that deliberately shares tables.
-* **Compressed files.** Decompression stops at `max_size` (default 2 GiB,
-  the largest possible FlatBuffer) with `DecompressionLimitError`.
+* **Input size.** Reading stops at `max_size` (default 2 GiB, the largest
+  possible FlatBuffer) with `DecompressionLimitError`. That covers
+  compressed files, what they decompress to, and special files such as
+  FIFOs or `/dev/zero`. Only regular files are memory-mapped.
 * **Untrusted `.bfbs` schemas.** These are verified against `reflection.fbs`,
-  every name must be a valid identifier, and struct and table layouts are
-  checked before use. Generated converter code never contains schema text.
+  every name must be a valid identifier, field ids must run 0..n−1, and
+  struct and table layouts are checked before use. Generated converter
+  code never contains schema text, and its cost grows linearly with schema
+  size (tables over 256 fields use a generic converter).
 * **Untrusted `.fbs` schemas.** Like flatc, an `include` can read any file
   the process can, so don't parse untrusted `.fbs` text that may use
   includes.

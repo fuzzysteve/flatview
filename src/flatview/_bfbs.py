@@ -213,6 +213,8 @@ def validate(schema: Schema) -> None:
                 if f.offset < 0 or f.offset + size > o.bytesize:
                     fail(f"{owner}: field at offset {f.offset} (+{size}) overruns struct size {o.bytesize}")
         else:
+            if sorted(f.id for f in o.fields) != list(range(len(o.fields))):
+                fail(f"table {o.name}: field ids must be 0..{len(o.fields) - 1} without gaps")
             ids = set()
             for f in o.fields:
                 owner = f"{o.name}.{f.name}"

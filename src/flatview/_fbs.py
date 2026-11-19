@@ -288,7 +288,7 @@ class _Parser:
                 t = self.next()
                 if t.kind != "number":
                     raise self.err("expected array length", t)
-                n = int(t.text, 0)
+                n = _to_int(t.text, f"{self.file}:{t.line}", "array length")
                 self.expect("]")
                 return ("array", inner, n)
             self.expect("]")
@@ -370,6 +370,13 @@ class _Parser:
 
 _SIMPLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", "0": "\0",
                    '"': '"', "'": "'", "\\": "\\", "/": "/"}
+
+
+def _to_int(text: str, where: str, what: str) -> int:
+    try:
+        return int(text, 0)
+    except ValueError:
+        raise SchemaError(f"{where}: invalid {what} {text[:40]!r}") from None
 
 
 def _unquote(s: str) -> str:
@@ -568,7 +575,7 @@ class _Resolver:
                            optional=ftype.base == BaseType.VECTOR)
                 tf.deprecated = f.deprecated
                 if explicit_ids:
-                    vid = int(fd.attrs["id"], 0)
+                    vid = _to_int(fd.attrs["id"], where, "field id")
                     tf.id, f.id = vid - 1, vid
                 else:
                     tf.id, f.id = next_id, next_id + 1
@@ -576,7 +583,7 @@ class _Resolver:
                 fields += [tf, f]
                 continue
             if explicit_ids:
-                f.id = int(fd.attrs["id"], 0)
+                f.id = _to_int(fd.attrs["id"], where, "field id")
             else:
                 f.id = next_id
                 next_id += 1
@@ -715,7 +722,7 @@ def _layout_one(obj: Object) -> None:
         minalign = max(minalign, align)
         prev = f
     if "force_align" in obj.attributes:
-        fa = int(obj.attributes["force_align"], 0)
+        fa = _to_int(obj.attributes["force_align"], obj.name, "force_align")
         if fa & (fa - 1) or fa < minalign or fa > 256:
             raise SchemaError(f"{obj.name}: force_align must be a power of two >= {minalign}")
         minalign = fa

@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 import mmap
 import os
+import stat
 import zlib
 from typing import Any
 
@@ -25,11 +26,11 @@ PathLike = str | os.PathLike
 
 
 class DecompressionLimitError(ValueError):
-    """Compressed input expands beyond the allowed size."""
+    """Input (or what it decompresses to) is larger than ``max_size``."""
 
 
 def _too_big(path: str, limit: int) -> DecompressionLimitError:
-    return DecompressionLimitError(f"{path}: decompressed data exceeds {limit:,} bytes "
+    return DecompressionLimitError(f"{path}: data exceeds {limit:,} bytes "
                                    "(pass max_size= to allow more)")
 
 
@@ -90,8 +91,17 @@ def read_bytes(path: PathLike, max_size: int = MAX_DECOMPRESSED) -> bytes:
     Decompression stops with DecompressionLimitError beyond ``max_size``.
     """
     with builtins.open(path, "rb") as fh:
-        data = fh.read()
+        data = _read_capped(fh, os.fspath(path), max_size)
     return _decompress(data, os.fspath(path), max_size)
+
+
+def _read_capped(fh, path: str, limit: int) -> bytes:
+    """Read a whole file, but never more than ``limit`` bytes: special files
+    such as /dev/zero or a FIFO have no size and would otherwise exhaust memory."""
+    data = fh.read(limit + 1)
+    if len(data) > limit:
+        raise _too_big(path, limit)
+    return data
 
 
 def load_schema(source: PathLike | bytes | Schema, include_paths: list[str] | None = None,
@@ -159,20 +169,35 @@ class FlatFile:
         self._fh = None
         data: Any
         fh = builtins.open(self.path, "rb")
-        head = fh.read(4)
-        compressed = head[:2] == _GZIP_MAGIC or head == _ZSTD_MAGIC
-        if use_mmap and not compressed and os.fstat(fh.fileno()).st_size > 0:
-            self._mmap = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
-            self._fh = fh
-            data = self._mmap
-        else:
-            fh.seek(0)
-            data = _decompress(fh.read(), self.path, max_size)
+        try:
+            st = os.fstat(fh.fileno())
+            head = fh.read(4)
+            compressed = head[:2] == _GZIP_MAGIC or head == _ZSTD_MAGIC
+            # mmap only regular files; devices/FIFOs are read with a size cap
+            if use_mmap and not compressed and stat.S_ISREG(st.st_mode) and st.st_size > 0:
+                if st.st_size > max_size:
+                    raise _too_big(self.path, max_size)
+                self._mmap = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+                self._fh = fh
+                data = self._mmap
+            else:
+                data = _decompress(head + _read_capped(fh, self.path, max_size - len(head)),
+                                   self.path, max_size)
+                fh.close()
+            self.data = memoryview(data)
+            self.size_prefixed = size_prefixed
+            self.root: TableView = read(self.schema, self.data, root, verify=verify,
+                                        size_prefixed=size_prefixed, check_identifier=check_identifier)
+        except BaseException:
+            # don't leave the handle/mapping open until garbage collection
+            if hasattr(self, "data"):
+                self.data.release()
+            if self._mmap is not None:
+                self._mmap.close()
+                self._mmap = None
             fh.close()
-        self.data = memoryview(data)
-        self.size_prefixed = size_prefixed
-        self.root: TableView = read(self.schema, self.data, root, verify=verify,
-                                    size_prefixed=size_prefixed, check_identifier=check_identifier)
+            self._fh = None
+            raise
 
     def verify(self, **kw) -> None:
         from ._verify import verify

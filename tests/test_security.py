@@ -348,3 +348,116 @@ def test_lone_surrogate_is_encode_error():
     with pytest.raises(flatview.EncodeError, match="not valid Unicode") as e:
         s.encode({"ss": ["ok", "\ud800"]})
     assert e.value.path == "ss[1]"
+
+
+# ===========================================================================
+# Third pass
+
+# 1. schema-driven quadratic cost
+
+def test_bfbs_with_gapped_field_ids_rejected():
+    d = bfbs_dict((SDE / "compressibleTypes.bfbs").read_bytes())
+    row = next(o for o in d["objects"] if o["name"].endswith(".CompressibleTypes"))
+    row["fields"] = [dict(row["fields"][0], id=6000, offset=4 + 2 * 6000, key=False)]
+    with pytest.raises(SchemaError, match="without gaps"):
+        flatview.load_bfbs(REFL.encode(d))
+
+
+def test_wide_table_converter_is_cheap():
+    import tracemalloc
+    n = 32765                     # the most fields a FlatBuffers table can have
+    s = parse_fbs("table T { " + " ".join(f"f{i}: int;" for i in range(n)) + " } root_type T;")
+    data = s.encode({"f0": 1, f"f{n - 1}": 2})
+    tracemalloc.start()
+    out = s.read(data)._asdict(defaults=False)
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    assert out == {"f0": 1, f"f{n - 1}": 2}
+    assert peak < 64 << 20        # was ~4 GB (quadratic), then ~400 MB (compiling a 32k-branch function)
+
+
+@pytest.mark.parametrize("opts", [{}, {"defaults": False}, {"enums": "name"}, {"enums": "value", "deprecated": True}])
+def test_generic_and_compiled_converters_agree(kitchen_schema, monkeypatch, opts):
+    from test_kitchen import blueprint_bytes
+    import flatview._todict as td
+    data = kitchen_schema.encode({"name": "x", "ships": [
+        {"typeID": 1, "name": "a", "race": "Amarr", "position": [1.0, 2.0, 3.0],
+         "modules": [{"name": "m", "flags": "Published Dynamic"}], "tags": ["t"], "slots": ["Rig"],
+         "primary_type": "Charge", "primary": {"typeID": 5}, "cargo_type": ["Module"],
+         "cargo": [{"name": "c"}], "blueprint": blueprint_bytes(kitchen_schema), "maybe": True}]})
+    compiled = kitchen_schema.read(data)._asdict(**opts)
+    monkeypatch.setattr(td, "WIDE_TABLE", 0)
+    kitchen_schema.__dict__.pop("_converters", None)
+    generic = kitchen_schema.read(data)._asdict(**opts)
+    kitchen_schema.__dict__.pop("_converters", None)
+    assert generic == compiled
+
+
+def test_generated_code_refuses_non_integers():
+    s = parse_fbs("table T { a: int; } root_type T;")
+    s["T"].fields[0].id = "0] + __import__('os').getpid() + e[0"
+    s["T"].view_class = None
+    with pytest.raises(TypeError, match="non-integer"):
+        s.read(s.encode({}))._asdict()
+
+
+# 2. empty nested flatbuffers
+
+def test_empty_nested_flatbuffer_rejected():
+    s = parse_fbs('table In { v: int; } table Out { n: [ubyte] (nested_flatbuffer: "In"); } root_type Out;')
+    with pytest.raises(flatview.EncodeError, match="must not be empty"):
+        s.encode({"n": b""})
+    b = Builder()
+    vec = b.create_scalar_vector(flatview.BaseType.UBYTE, [])
+    data = b.finish(b.table([(0, "offset", vec, 4)]))
+    with pytest.raises(VerificationError, match="nested flatbuffer is empty"):
+        s.verify(data)
+
+
+# 3. bounded reads of special files
+
+def test_special_files_are_read_with_a_cap():
+    s = parse_fbs("table T { a: int; } root_type T;")
+    t = time.perf_counter()
+    with pytest.raises(DecompressionLimitError):
+        flatview.open("/dev/zero", s, max_size=1 << 20)
+    with pytest.raises(DecompressionLimitError):
+        flatview.read_bytes("/dev/zero", max_size=1 << 20)
+    assert time.perf_counter() - t < 2
+
+
+def test_oversized_regular_file_rejected_before_mmap(tmp_path):
+    p = tmp_path / "big.fb"
+    p.write_bytes(b"\0" * 4096)
+    s = parse_fbs("table T { a: int; } root_type T;")
+    with pytest.raises(DecompressionLimitError):
+        flatview.open(p, s, max_size=1024)
+
+
+# 4. numeric literals
+
+@pytest.mark.parametrize("src", [
+    "table T { a: int (id: abc); }",
+    "struct S (force_align: x) { a: int; }",
+    "table T { a: int (id: " + "9" * 5000 + "); }",
+    "struct S { a: [int:" + "9" * 5000 + "]; }",
+])
+def test_bad_numbers_are_schema_errors(src):
+    with pytest.raises(SchemaError):
+        parse_fbs(src)
+
+
+# 5. no leaked handles on a failed open
+
+def test_failed_open_releases_file(tmp_path):
+    import gc
+    import warnings
+    s = parse_fbs('table T { a: int; } root_type T; file_identifier "ABCD";')
+    p = tmp_path / "x.fb"
+    p.write_bytes(s.encode({"a": 1}, file_identifier="ZZZZ"))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ResourceWarning)
+        for _ in range(3):
+            with pytest.raises(flatview.FlatBufferError, match="identifier"):
+                flatview.open(p, s)
+        gc.collect()          # an unclosed file would raise ResourceWarning here

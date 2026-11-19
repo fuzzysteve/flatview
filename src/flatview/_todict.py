@@ -28,6 +28,58 @@ def _flag_namer(enum_: Enum) -> Callable[[int], Any]:
     return name
 
 
+#: Tables with more fields than this use the generic (non-compiled) converter.
+WIDE_TABLE = 256
+
+
+def _generic_table(schema: Schema, obj: Object, defaults: bool, enums: str,
+                   deprecated: bool) -> Callable[[Any, int], dict]:
+    """Field-by-field converter through the view classes: same output as the
+    compiled converters, constant code size whatever the table width."""
+    from ._reader import _plain, view_class
+    cls = view_class(schema, obj)
+    fields = [(f.name, cls._getters[f.name], f.key) for f in obj.fields
+              if deprecated or not f.deprecated]
+
+    def convert(buf, pos):
+        # views expect a memoryview; the fast path may hand us bytes/mmap
+        view = cls(buf if isinstance(buf, memoryview) else memoryview(buf), pos)
+        d = {}
+        for name, getter, key in fields:
+            if not defaults and not key and not view._has(name):
+                continue
+            d[name] = _plain(getter(view), defaults, enums, deprecated)
+        return d
+    return convert
+
+
+def _int(x: Any) -> int:
+    """Guard for every number interpolated into generated source."""
+    if type(x) is not int:
+        raise TypeError(f"refusing to generate code from non-integer {x!r}")
+    return x
+
+
+class _Unpackers(dict):
+    """k -> unpacker for k little-endian u16s, created on first use."""
+
+    def __missing__(self, k: int):
+        if k < 0:
+            raise struct.error(f"invalid vtable length {2 * k + 4}")
+        fn = self[k] = struct.Struct(f"<{k}H").unpack_from
+        return fn
+
+
+class _ZeroPads(dict):
+    """m -> (0,) * m; only short pads are cached, so memory stays bounded."""
+
+    def __missing__(self, m: int):
+        pad = (0,) * m
+        if m <= 256:
+            self[m] = pad
+        return pad
+
+
 class _Gen:
     def __init__(self, schema: Schema, defaults: bool, enums: str, deprecated: bool, raw: bool):
         self.schema = schema
@@ -64,19 +116,18 @@ class _Gen:
         return name
 
     def vt_reader(self, n: int) -> tuple[str, str, str]:
-        """Names of: unpacker for n slots, dict of shorter unpackers, zero pads."""
+        """Names of: unpacker for n slots, lazy dict of shorter unpackers, lazy zero pads.
+
+        Entries are created on demand, for vtable lengths actually seen, so a
+        wide table costs nothing up front (eager tables were O(n^2)).
+        """
+        n = _int(n)
         full = f"vt{n}"
         if full not in self.ns:
             self.ns[full] = struct.Struct(f"<{n}H").unpack_from
         if "VT" not in self.ns:
-            self.ns["VT"] = {}
-            self.ns["Z"] = {}
-        vt, z = self.ns["VT"], self.ns["Z"]
-        for k in range(n + 1):
-            if k not in vt:
-                vt[k] = struct.Struct(f"<{k}H").unpack_from
-            if n - k not in z:
-                z[n - k] = (0,) * (n - k)
+            self.ns["VT"] = _Unpackers()
+            self.ns["Z"] = _ZeroPads()
         return full, "VT", "Z"
 
     def enum_expr(self, enum_: Enum | None, expr: str) -> str:
@@ -143,7 +194,7 @@ class _Gen:
     def gen_struct(self, obj: Object, name: str) -> None:
         parts = []
         for f in obj.fields:
-            parts.append(f"{f.name!r}: {self.struct_field_expr(f, 'pos + %d' % f.offset)}")
+            parts.append(f"{f.name!r}: {self.struct_field_expr(f, 'pos + %d' % _int(f.offset))}")
         self.src.append(f"def {name}(buf, pos):\n    return {{{', '.join(parts)}}}\n")
 
     def struct_field_expr(self, f: Field, at: str) -> str:
@@ -153,9 +204,9 @@ class _Gen:
         if t.base == BaseType.OBJ:
             return f"{self.fn(t.ref)}(buf, {at})"
         if t.base == BaseType.ARRAY:
-            n = t.fixed_length
+            n = _int(t.fixed_length)
             if t.element == BaseType.OBJ:
-                size = t.ref.bytesize
+                size = _int(t.ref.bytesize)
                 return f"[{self.fn(t.ref)}(buf, q) for q in range({at}, {at} + {size * n}, {size})]"
             fmt = self.const("<%d%s" % (n, SCALAR_FORMAT[t.element]), "A")
             raw = f"list(unpack_from({fmt}, buf, {at}))"
@@ -165,8 +216,14 @@ class _Gen:
         raise NotImplementedError(t.base)
 
     def gen_table(self, obj: Object, name: str) -> None:
+        if len(obj.fields) > WIDE_TABLE:
+            # Compiling one branch per field costs ~13 KB per field, and a
+            # hostile schema can declare 32k fields: use the generic converter.
+            g = self.const(_generic_table(self.schema, obj, self.defaults, self.enums, self.deprecated), "G")
+            self.src.append(f"def {name}(buf, pos):\n    return {g}(buf, pos)\n")
+            return
         fields = [f for f in obj.fields if self.deprecated or not f.deprecated]
-        nslots = max((f.id for f in obj.fields), default=-1) + 1
+        nslots = max((_int(f.id) for f in obj.fields), default=-1) + 1
         lines = [f"def {name}(buf, pos):",
                  "    vt = pos - i32(buf, pos)[0]",
                  "    d = {}"]
@@ -185,7 +242,7 @@ class _Gen:
         t = f.type
         base = t.base
         key = repr(f.name)
-        out = [f"    o = e[{f.id}]", "    if o:"]
+        out = [f"    o = e[{_int(f.id)}]", "    if o:"]
         body: list[str] = []
         if base.is_scalar:
             read = f"{self.scalar_reader(base)}(buf, pos + o)[0]"
@@ -207,7 +264,7 @@ class _Gen:
         elif base == BaseType.UNION:
             tf = obj.fields_by_name[f.name + "_type"]
             members = self.union_members(t.ref)
-            body += [f"ut = buf[pos + e[{tf.id}]] if e[{tf.id}] else 0",
+            body += [f"ut = buf[pos + e[{_int(tf.id)}]] if e[{_int(tf.id)}] else 0",
                      f"m = {members}.get(ut)",
                      "p = pos + o",
                      f"d[{key}] = m(buf, p + u32(buf, p)[0]) if m is not None else None"]
@@ -255,14 +312,14 @@ class _Gen:
             return [f"d[{key}] = [{self.decode('q + 4', 'q + 4 + u32(buf, q)[0]')} "
                     f"for q in [r + u32(buf, r)[0] for r in range(p + 4, p + 4 + 4 * n, 4)]]"]
         if el == BaseType.OBJ and t.ref.is_struct:
-            size = t.ref.bytesize
+            size = _int(t.ref.bytesize)
             return [f"d[{key}] = [{self.fn(t.ref)}(buf, q) for q in range(p + 4, p + 4 + {size} * n, {size})]"]
         if el == BaseType.OBJ:
             return [f"d[{key}] = [{self.fn(t.ref)}(buf, q + u32(buf, q)[0]) for q in range(p + 4, p + 4 + 4 * n, 4)]"]
         if el == BaseType.UNION:
             tf = obj.fields_by_name[f.name + "_type"]
             members = self.union_members(t.ref)
-            return [f"tp = pos + e[{tf.id}]", "tp += u32(buf, tp)[0]",
+            return [f"tp = pos + e[{_int(tf.id)}]", "tp += u32(buf, tp)[0]",
                     f"d[{key}] = [({members}.get(buf[tp + 4 + i]) or (lambda b, x: None))(buf, q + u32(buf, q)[0]) "
                     f"for i, q in enumerate(range(p + 4, p + 4 + 4 * n, 4))]"]
         return [f"raise NotImplementedError({'vector of ' + el.name!r})"]

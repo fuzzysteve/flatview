@@ -393,6 +393,8 @@ class _Encoder:
                            strict=self.strict, file_identifier=False)
         if isinstance(value, (str, Mapping)):
             raise EncodeError(path, f"expected a sequence for vector {t.describe()}, got {type(value).__name__}")
+        if nested is not None and len(value) == 0:
+            raise EncodeError(path, "nested flatbuffer must not be empty (omit the field instead)")
         from ._reader import ScalarVector
         if el.is_scalar:
             if isinstance(value, ScalarVector):

@@ -77,6 +77,13 @@ library itself has no runtime dependencies; keep it that way.
   interpretation of a buffer, nested ones included.
 - Nothing driven by schema depth may recurse in Python. Struct layout, the cycle check
   and converter generation use explicit work stacks.
+- Costs driven by schema *width* must stay linear. vtable-reader caches in `_todict.py`
+  are lazy (`_Unpackers`, `_ZeroPads`), and tables over `WIDE_TABLE` fields use
+  `_generic_table` instead of compiled code. Every number in generated source goes
+  through `_int()`.
+- Every file read is capped (`_read_capped`); only regular files are mmapped.
+- Reader and verifier must agree on edge cases. For example, empty nested flatbuffers
+  are rejected by the verifier and refused by the encoder, as flatc does.
 
 ## Testing conventions
 

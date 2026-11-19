@@ -211,7 +211,9 @@ class _Verifier:
                 for i, v in enumerate(struct.unpack_from(f"<{n}{_fmt(el)}", self.buf, start)):
                     self.enum_value(f, v, f"{fpath}[{i}]")
             nested = f.attributes.get("nested_flatbuffer")
-            if nested is not None and n:
+            if nested is not None and not n:
+                self.fail(fpath, "nested flatbuffer is empty")
+            if nested is not None:
                 from ._reader import _resolve_in
                 target = _resolve_in(self.schema, nested, obj.namespace)
                 sub = _Verifier(self.schema, self.buf[start:start + n], max_depth=self.max_depth - depth,
