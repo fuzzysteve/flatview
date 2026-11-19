@@ -187,7 +187,8 @@ asked. If you need those, use the `.fbs`.
 ```python
 fb = flatview.open(path, schema=None, verify=False, use_mmap=True)
 root = schema.read(data)          # bytes / bytearray / mmap / memoryview
-root = schema.read(data, "Other") # any table as root; size prefix auto-detected
+root = schema.read(data, "Other") # any table as root
+root = schema.read(data, size_prefixed=True)   # never guessed: say so explicitly
 fb.products                       # shorthand for fb.root.products
 
 row.field / row["field"]          # value, default, or None
@@ -269,6 +270,11 @@ it's up to you:
 * **Untrusted `.fbs` schemas.** Like flatc, an `include` can read any file
   the process can, so don't parse untrusted `.fbs` text that may use
   includes.
+* **Size prefixes are never guessed.** A valid buffer's first word can
+  equal its length minus 4, so pass `size_prefixed=True` explicitly.
+* **Schema names.** Enum value names that Python's `enum` module reserves
+  (`_missing_`, `mro`, dunders) make that enum read as plain ints rather
+  than fail, and fields named `__x__` are reachable only as `view["__x__"]`.
 * **Memory-mapped files.** If another process truncates a file in place
   while it's open, Python crashes with SIGBUS (true of any mmap). Replacing
   files by atomic rename is safe. `open(..., use_mmap=False)` avoids mmap

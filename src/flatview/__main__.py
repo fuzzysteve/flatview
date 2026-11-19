@@ -64,7 +64,7 @@ def _main_vector(root: TableView) -> TableVector | None:
 
 
 def cmd_info(args) -> int:
-    fb = fv_open(args.file, args.schema)
+    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed)
     s = fb.schema
     print(f"file:    {args.file} ({len(fb.data):,} bytes uncompressed)")
     print(f"schema:  {s.source}")
@@ -90,7 +90,7 @@ def cmd_info(args) -> int:
 
 
 def cmd_get(args) -> int:
-    fb = fv_open(args.file, args.schema)
+    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed)
     vec = _pick(fb.root, args.path) if args.path else _main_vector(fb.root)
     if not isinstance(vec, TableVector) or vec.key_field is None:
         print("error: no keyed vector to look up in (use --path)", file=sys.stderr)
@@ -109,7 +109,7 @@ def cmd_get(args) -> int:
 
 
 def cmd_dump(args) -> int:
-    fb = fv_open(args.file, args.schema)
+    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed)
     target = _pick(fb.root, args.path)
     if args.jsonl:
         if not isinstance(target, Vector):
@@ -137,7 +137,7 @@ def cmd_dump(args) -> int:
 
 
 def cmd_verify(args) -> int:
-    fb = fv_open(args.file, args.schema)
+    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed)
     t = time.perf_counter()
     try:
         fb.verify(strict_enums=args.strict_enums, check_sorted=not args.no_sorted)
@@ -172,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
     def common(sp):
         sp.add_argument("file")
         sp.add_argument("-s", "--schema", help=".fbs/.bfbs (default: next to the file)")
+        sp.add_argument("--size-prefixed", action="store_true", help="buffer starts with a 4-byte length")
 
     sp = sub.add_parser("info", help="summarise a file and its schema")
     common(sp)

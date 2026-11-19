@@ -144,7 +144,7 @@ class FlatFile:
 
     def __init__(self, path: PathLike, schema: PathLike | Schema | None = None, *,
                  root: str | None = None, verify: bool = False, use_mmap: bool = True,
-                 size_prefixed: bool | None = None, check_identifier: bool = True,
+                 size_prefixed: bool = False, check_identifier: bool = True,
                  max_size: int = MAX_DECOMPRESSED):
         self.path = os.fspath(path)
         if schema is None:
@@ -170,15 +170,19 @@ class FlatFile:
             data = _decompress(fh.read(), self.path, max_size)
             fh.close()
         self.data = memoryview(data)
+        self.size_prefixed = size_prefixed
         self.root: TableView = read(self.schema, self.data, root, verify=verify,
                                     size_prefixed=size_prefixed, check_identifier=check_identifier)
 
     def verify(self, **kw) -> None:
         from ._verify import verify
+        kw.setdefault("size_prefixed", self.size_prefixed)
         verify(self.schema, self.data, self.root._object, **kw)
 
     def close(self) -> None:
-        """Release the mapping. Views still alive keep the memory valid."""
+        """Release the mapping. Views created from this file stop working
+        (they raise ValueError: released memoryview); finish with them, or
+        copy what you need with ``_asdict()``, before closing."""
         if self._mmap is not None:
             try:
                 self.data.release()

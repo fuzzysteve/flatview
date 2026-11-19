@@ -469,7 +469,9 @@ def _enum_converter(enum: Enum | None) -> Callable | None:
     if enum is None:
         return None
     members = {}
-    py = enum.python
+    py = enum.python_or_none
+    if py is None:
+        return None          # names unusable as a Python enum: plain ints
     for v in enum.values:
         members[v.value] = py(v.value)
     get = members.get
@@ -644,7 +646,7 @@ def _table_getter(schema: Schema, obj: Object, f: Field) -> Callable:
                 vp = p + _u32(self._buf, p)[0]
                 n = _u32(self._buf, vp)[0]
                 inner = self._buf[vp + 4:vp + 4 + n]
-                return read(schema, inner, target, check_identifier=False)
+                return read(schema, inner, target, size_prefixed=False, check_identifier=False)
             return get
 
         if el.is_scalar:
@@ -835,24 +837,19 @@ def has_identifier(data: Any, ident: str | bytes, size_prefixed: bool = False) -
     return len(buf) >= base + 8 and bytes(buf[base + 4:base + 8]) == ident
 
 
-def detect_size_prefix(buf: memoryview) -> bool:
-    """Heuristic: the buffer starts with a u32 equal to the remaining length."""
-    return len(buf) >= 12 and _u32(buf, 0)[0] == len(buf) - 4
-
-
 def read(schema: Schema, data: Any, root: str | Object | None = None, *, verify: bool = False,
-         size_prefixed: bool | None = None, check_identifier: bool = True) -> TableView:
+         size_prefixed: bool = False, check_identifier: bool = True) -> TableView:
     """View the root table of ``data`` (bytes, bytearray, mmap, memoryview).
 
-    size_prefixed: None auto-detects a leading length prefix.
+    size_prefixed: the buffer starts with a 4-byte length (FinishSizePrefixed).
+                   Never guessed: a valid buffer's root offset can equal its
+                   length - 4, so auto-detection would misread real data.
     verify:        run the full verifier first (recommended for untrusted data).
     """
     buf = _as_buffer(data)
     obj = schema.object(root)
     if obj.is_struct:
         raise SchemaError(f"root type {obj.name} must be a table")
-    if size_prefixed is None:
-        size_prefixed = detect_size_prefix(buf)
     if size_prefixed:
         n = _u32(buf, 0)[0]
         if n + 4 > len(buf):

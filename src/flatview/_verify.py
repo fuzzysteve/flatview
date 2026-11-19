@@ -13,7 +13,7 @@ from __future__ import annotations
 import struct
 from typing import Any
 
-from ._reader import _as_buffer, _key_reader, detect_size_prefix
+from ._reader import _as_buffer, _key_reader
 from ._schema import BaseType, Field, Object, Schema, SCALAR_SIZE
 
 _u16 = struct.Struct("<H").unpack_from
@@ -284,7 +284,7 @@ def _show(k: Any) -> str:
 
 
 def verify(schema: Schema, data: Any, root: str | Object | None = None, *,
-           size_prefixed: bool | None = None, check_identifier: bool = True,
+           size_prefixed: bool = False, check_identifier: bool = True,
            max_depth: int = 64, max_refs: int | None = None, check_alignment: bool = True,
            check_sorted: bool = True, check_utf8: bool = True, strict_enums: bool = False,
            strict_table_size: bool = False) -> None:
@@ -298,8 +298,6 @@ def verify(schema: Schema, data: Any, root: str | Object | None = None, *,
     """
     buf = _as_buffer(data)
     obj = schema.object(root)
-    if size_prefixed is None:
-        size_prefixed = detect_size_prefix(buf)
     base = 0
     if size_prefixed:
         base = 4

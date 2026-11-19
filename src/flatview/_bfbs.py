@@ -237,20 +237,26 @@ def validate(schema: Schema) -> None:
                 if f.key and not (t.base.is_scalar or t.base == BaseType.STRING):
                     fail(f"{owner}: key field must be a scalar or string")
 
-    # structs must not contain themselves (directly or indirectly)
-    state: dict[str, int] = {}
-
-    def visit(o: Object) -> None:
-        if state.get(o.name) == 2:
-            return
-        if state.get(o.name) == 1:
-            fail(f"struct {o.name} contains itself")
-        state[o.name] = 1
-        for f in o.fields:
-            if f.type.item == BaseType.OBJ:
-                visit(f.type.ref)
-        state[o.name] = 2
-
-    for o in schema.objects.values():
-        if o.is_struct:
-            visit(o)
+    # structs must not contain themselves (directly or indirectly); iterative
+    # so deep nesting cannot hit the recursion limit
+    state: dict[str, int] = {}           # 1 = on the current path, 2 = done
+    for start in schema.objects.values():
+        if not start.is_struct or state.get(start.name) == 2:
+            continue
+        work: list[tuple[Object, bool]] = [(start, False)]
+        while work:
+            o, ready = work.pop()
+            if ready:
+                state[o.name] = 2
+                continue
+            if state.get(o.name) == 2:
+                continue
+            state[o.name] = 1
+            work.append((o, True))
+            for f in o.fields:
+                if f.type.item == BaseType.OBJ:
+                    sub = f.type.ref
+                    if state.get(sub.name) == 1:
+                        fail(f"struct {sub.name} contains itself")
+                    if state.get(sub.name) != 2:
+                        work.append((sub, False))

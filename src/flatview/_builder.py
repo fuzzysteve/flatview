@@ -234,6 +234,12 @@ class _Encoder:
             value |= ev.value
         return value
 
+    def string(self, value: str | bytes, path: str) -> int:
+        try:
+            return self.b.create_string(value, self.share)
+        except UnicodeEncodeError as e:
+            raise EncodeError(path, f"string is not valid Unicode ({e.reason} at index {e.start})") from None
+
     # -- structs ---------------------------------------------------------------
     def struct_blob(self, obj: Object, v: Any, path: str) -> bytes:
         blob = bytearray(obj.bytesize)
@@ -331,7 +337,7 @@ class _Encoder:
             elif base == BaseType.STRING:
                 if not isinstance(fv, (str, bytes)):
                     raise EncodeError(fpath, f"expected a string, got {type(fv).__name__}")
-                items.append((f.id, "offset", self.b.create_string(fv, self.share), 4))
+                items.append((f.id, "offset", self.string(fv, fpath), 4))
             elif base == BaseType.OBJ:
                 items.append((f.id, "offset", self.table(t.ref, fv, fpath), 4))
             elif base == BaseType.UNION:
@@ -365,7 +371,9 @@ class _Encoder:
             raise EncodeError(path, f"{ut} is not a valid member type of union {union.name}")
         mt = member.union_type
         if mt.base == BaseType.STRING:
-            return self.b.create_string(value, self.share)
+            if not isinstance(value, (str, bytes)):
+                raise EncodeError(path, f"expected a string, got {type(value).__name__}")
+            return self.string(value, path)
         if mt.ref.is_struct:
             blob = self.struct_blob(mt.ref, value, path)
             self.b.prep(mt.ref.minalign, len(blob))
@@ -403,7 +411,7 @@ class _Encoder:
             for i, x in enumerate(value):
                 if not isinstance(x, (str, bytes)):
                     raise EncodeError(f"{path}[{i}]", f"expected a string, got {type(x).__name__}")
-                offs.append(self.b.create_string(x, self.share))
+                offs.append(self.string(x, f"{path}[{i}]"))
             return self.b.create_offset_vector(offs)
         if el == BaseType.OBJ and t.ref.is_struct:
             blobs = [self.struct_blob(t.ref, x, f"{path}[{i}]") for i, x in enumerate(value)]

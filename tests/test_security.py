@@ -1,6 +1,7 @@
 """Regression tests for the security review: untrusted schemas, buffers and files."""
 
 import builtins
+import struct
 import importlib.util
 import json
 import time
@@ -262,3 +263,88 @@ def test_bad_string_escapes_are_schema_errors(literal):
 def test_deeply_nested_type_brackets():
     with pytest.raises(SchemaError, match="nested vectors"):
         parse_fbs("table T { x: " + "[" * 5000 + "int" + "]" * 5000 + "; }")
+
+
+# ===========================================================================
+# Second pass
+
+# A. size prefixes are never guessed (a valid buffer's root offset can equal
+#    len - 4, e.g. a root table with no fields set)
+
+def test_minimal_buffer_not_mistaken_for_size_prefixed():
+    s = parse_fbs("table T { v: int; } root_type T;")
+    data = s.encode({})
+    assert struct.unpack_from("<I", data)[0] == len(data) - 4   # the ambiguous case
+    s.verify(data)
+    assert s.read(data).v == 0
+    assert s.read(data)._asdict() == {"v": 0}
+
+
+def test_nested_buffer_read_like_verifier():
+    s = parse_fbs('table In { v: int; } table Out { n: [ubyte] (nested_flatbuffer: "In"); } root_type Out;')
+    inner = struct.pack("<IHHi", 8, 4, 4, 4)      # valid; root offset 8 == len - 4
+    data = s.encode({"n": inner})
+    s.verify(data)
+    assert s.read(data).n.v == 0                  # view and converter now agree
+    assert s.read(data)._asdict() == {"n": {"v": 0}}
+
+
+# B. zero-size structs
+
+def test_empty_struct_rejected_like_flatc():
+    with pytest.raises(SchemaError, match="size 0 structs not allowed"):
+        parse_fbs("struct E {} table T { e: [E]; } root_type T;")
+
+
+# C. enum value names Python's enum module reserves
+
+@pytest.mark.parametrize("name", ["_missing_", "mro", "__eq__", "_generate_next_value_"])
+def test_reserved_enum_names_fall_back_to_ints(name):
+    s = parse_fbs(f"enum C : byte {{ A, {name} }} table T {{ c: C; cs: [C]; }} root_type T;")
+    t = s.read(s.encode({"c": 1, "cs": [0, 1]}))
+    assert t.c == 1 and type(t.c) is int
+    assert t.cs.tolist() == [0, 1]
+    assert t._asdict() == {"c": 1, "cs": [0, 1]}
+    assert t._asdict(enums="name") == {"c": name, "cs": ["A", name]}   # names still available
+    with pytest.raises(SchemaError, match="cannot be a Python enum"):
+        s["C"].python
+
+
+def test_ordinary_enum_names_still_members():
+    s = parse_fbs("enum C : byte { A, name, value } table T { c: C; } root_type T;")
+    assert s.read(s.encode({"c": 2})).c is s["C"].python.value
+
+
+# D. deep schemas don't hit the recursion limit
+
+def test_deep_struct_nesting_any_declaration_order():
+    n = 3000
+    decls = [f"struct S{i} {{ s: S{i - 1}; }}" for i in range(1, n)] + ["struct S0 { a: int; }"]
+    for order in (decls, decls[::-1]):
+        s = parse_fbs("\n".join(order))
+        assert s["S2999"].bytesize == 4
+
+
+def test_deep_table_type_chain_converts():
+    n = 3000
+    src = "".join(f"table T{i} {{ t: T{i + 1}; }}\n" for i in range(n)) + f"table T{n} {{ v: int; }}\nroot_type T0;"
+    s = parse_fbs(src)
+    data = s.encode({"t": {"t": {}}})
+    assert s.read(data)._asdict(defaults=False) == {"t": {"t": {}}}
+
+
+def test_struct_cycle_in_bfbs_rejected():
+    from flatview._bfbs import validate
+    s = parse_fbs("struct A { x: int; } struct B { a: A; } table T { b: B; } root_type T;")
+    s["A"].fields[0].type = flatview.Type(flatview.BaseType.OBJ, ref=s["B"])   # A -> B -> A
+    with pytest.raises(SchemaError, match="contains itself"):
+        validate(s)
+
+
+# G. encoding a lone surrogate
+
+def test_lone_surrogate_is_encode_error():
+    s = parse_fbs("table T { s: string; ss: [string]; } root_type T;")
+    with pytest.raises(flatview.EncodeError, match="not valid Unicode") as e:
+        s.encode({"ss": ["ok", "\ud800"]})
+    assert e.value.path == "ss[1]"

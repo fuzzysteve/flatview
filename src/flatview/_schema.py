@@ -262,20 +262,44 @@ class Enum:
 
     @property
     def python(self) -> type:
-        """A Python ``IntEnum`` (``IntFlag`` for bit_flags) for this enum."""
+        """A Python ``IntEnum`` (``IntFlag`` for bit_flags) for this enum.
+
+        Raises SchemaError if a value name is one Python's enum module
+        reserves (``_missing_``, ``mro``, dunders...); readers then fall back
+        to plain ints for this enum.
+        """
+        py = self.python_or_none
+        if py is None:
+            raise SchemaError(f"enum {self.name} cannot be a Python enum: {self._py_error}")
+        return py
+
+    @property
+    def python_or_none(self) -> type | None:
         if self._py is None:
-            members = [(v.name, v.value) for v in self.values]
-            if self.bit_flags:
-                self._py = enum.IntFlag(self.short_name, members, boundary=enum.KEEP)
-            else:
-                self._py = enum.IntEnum(self.short_name, members)
-            self._py.__qualname__ = self.name
-        return self._py
+            try:
+                members = [(v.name, v.value) for v in self.values]
+                if self.bit_flags:
+                    py = enum.IntFlag(self.short_name, members, boundary=enum.KEEP)
+                else:
+                    py = enum.IntEnum(self.short_name, members)
+                for v in self.values:
+                    m = py.__members__.get(v.name)
+                    if m is None or int(m) != v.value:
+                        raise ValueError(f"value name {v.name!r} is reserved by Python's enum module")
+                py.__qualname__ = self.name
+                self._py = py
+            except (ValueError, TypeError) as e:
+                self._py = False
+                self._py_error = str(e)
+        return self._py or None
 
     def convert(self, value: int) -> Any:
         """Map a raw integer to the Python enum member (raw int if unknown)."""
+        py = self.python_or_none
+        if py is None:
+            return value
         try:
-            return self.python(value)
+            return py(value)
         except ValueError:
             return value
 
@@ -327,7 +351,7 @@ class Schema:
 
     # -- convenience entry points (implemented in other modules) -------------
     def read(self, data: Any, root: str | Object | None = None, *, verify: bool = False,
-             size_prefixed: bool | None = None, check_identifier: bool = True):
+             size_prefixed: bool = False, check_identifier: bool = True):
         """Return a lazy view over the root table of a buffer."""
         from ._reader import read
         return read(self, data, root, verify=verify, size_prefixed=size_prefixed,

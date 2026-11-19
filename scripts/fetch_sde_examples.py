@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -26,12 +27,28 @@ DEFAULT = ["_sde", "categories", "groups", "types", "typeDogma", "typeMaterials"
 HEADERS = {"User-Agent": "flatview-sde-examples/0.1"}
 SAFE_NAME = re.compile(r"[A-Za-z0-9_]+")   # table names become file names
 ALLOWED_HOST = "sde.evetech.net"
+MAX_DOWNLOAD = 1 << 30                       # largest compressed file is ~30 MB
+
+
+class _SameHostRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow redirects only to https://sde.evetech.net/."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        u = urllib.parse.urlsplit(newurl)
+        if u.scheme != "https" or u.hostname != ALLOWED_HOST:
+            raise urllib.error.HTTPError(newurl, code, f"refusing redirect to {newurl}", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_SameHostRedirects)
 OUT = os.path.join(os.path.dirname(__file__), "..", "tests", "data", "sde-full")
 
 
 def fetch(url: str) -> bytes:
-    with urllib.request.urlopen(urllib.request.Request(url, headers=HEADERS), timeout=120) as r:
-        data = r.read()
+    with _OPENER.open(urllib.request.Request(url, headers=HEADERS), timeout=120) as r:
+        data = r.read(MAX_DOWNLOAD + 1)
+    if len(data) > MAX_DOWNLOAD:
+        raise OSError(f"{url}: response larger than {MAX_DOWNLOAD:,} bytes")
     return _decompress(data, url)
 
 

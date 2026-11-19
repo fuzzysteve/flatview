@@ -72,6 +72,11 @@ library itself has no runtime dependencies; keep it that way.
   against `max_refs` (amplification protection).
 - All decompression goes through `_io._decompress` with a size cap (`max_size`, default
   2 GiB).
+- Never auto-detect size prefixes. A valid buffer's root offset can equal `len - 4`
+  (e.g. a root table with no fields set). Reader and verifier must agree on every
+  interpretation of a buffer, nested ones included.
+- Nothing driven by schema depth may recurse in Python. Struct layout, the cycle check
+  and converter generation use explicit work stacks.
 
 ## Testing conventions
 

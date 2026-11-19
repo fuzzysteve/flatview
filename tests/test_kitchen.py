@@ -150,9 +150,10 @@ def test_asdict_matches_flatc_json(kitchen_schema, fleet):
 def test_size_prefixed(kitchen_schema, fleet):
     data = kitchen_schema.encode(fleet, size_prefixed=True)
     assert struct.unpack_from("<I", data)[0] == len(data) - 4
-    assert kitchen_schema.read(data).name == "Home Defence"          # auto-detected
     assert kitchen_schema.read(data, size_prefixed=True).name == "Home Defence"
-    kitchen_schema.verify(data)
+    kitchen_schema.verify(data, size_prefixed=True)
+    with pytest.raises(VerificationError):        # prefixes are never guessed
+        kitchen_schema.verify(data)
 
 
 def test_wrong_identifier_rejected(kitchen_schema, fleet):
@@ -311,7 +312,7 @@ def test_asdict_same_for_bytes_and_memoryview(kitchen_schema, fleet, opts):
     plain = kitchen_schema.encode(fleet)                       # bytes: fast "raw" decode path
     prefixed = kitchen_schema.encode(fleet, size_prefixed=True)  # sliced memoryview path
     a = kitchen_schema.read(plain)._asdict(**opts)
-    b = kitchen_schema.read(prefixed)._asdict(**opts)
+    b = kitchen_schema.read(prefixed, size_prefixed=True)._asdict(**opts)
     assert a == b
     assert a["ships"][1]["blueprint"]["runs"] == 7               # nested buffer converted
     assert flatview.to_python(kitchen_schema.read(plain).ships, **opts) == a["ships"]

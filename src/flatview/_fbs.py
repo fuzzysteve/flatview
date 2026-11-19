@@ -671,14 +671,36 @@ def _scalar_align(t: Type, item: BaseType) -> tuple[int, int]:
 
 
 def _layout_struct(self: _Resolver, obj: Object, stack: set[str], done: set[str]) -> None:
-    if obj.name in done:
-        return
-    if obj.name in stack:
-        raise SchemaError(f"struct {obj.name} contains itself")
-    stack.add(obj.name)
-    for f in obj.fields:
-        if f.type.item == BaseType.OBJ:
-            self.layout_struct(f.type.ref, stack, done)
+    """Lay out ``obj`` and every struct it contains, innermost first.
+
+    Iterative (explicit stack), so deeply nested struct declarations cannot
+    hit Python's recursion limit.
+    """
+    work: list[tuple[Object, bool]] = [(obj, False)]
+    while work:
+        o, ready = work.pop()
+        if o.name in done:
+            continue
+        if ready:
+            stack.discard(o.name)
+            _layout_one(o)
+            done.add(o.name)
+            continue
+        if o.name in stack:
+            raise SchemaError(f"struct {o.name} contains itself")
+        if not o.fields:
+            raise SchemaError(f"struct {o.name}: size 0 structs not allowed")
+        stack.add(o.name)
+        work.append((o, True))
+        for f in o.fields:
+            if f.type.item == BaseType.OBJ and f.type.ref.name not in done:
+                if f.type.ref.name in stack:
+                    raise SchemaError(f"struct {f.type.ref.name} contains itself")
+                work.append((f.type.ref, False))
+
+
+def _layout_one(obj: Object) -> None:
+    """Compute offsets/padding/size of one struct whose members are laid out."""
     size, minalign = 0, 1
     prev: Field | None = None
     for f in obj.fields:
@@ -702,8 +724,6 @@ def _layout_struct(self: _Resolver, obj: Object, stack: set[str], done: set[str]
         prev.padding += pad
     obj.bytesize = size + pad
     obj.minalign = minalign
-    stack.discard(obj.name)
-    done.add(obj.name)
 
 
 def _check_nested(self: _Resolver, obj: Object, d: _ObjDecl) -> None:
