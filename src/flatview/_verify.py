@@ -33,9 +33,11 @@ class _Verifier:
                  base: int = 0, strict_table_size: bool = False):
         self.schema = schema
         # flatc's verifier bounds fields by the buffer, not by the table size
-        # recorded in the vtable. Some writers (e.g. the one behind CCP's SDE
-        # files) record a size that excludes a trailing 8-byte field, so the
-        # stricter check is opt-in.
+        # recorded in the vtable. The Go builder (used for CCP's SDE files)
+        # shares vtables between tables of different sizes, so a vtable can
+        # record a size too small for some of its users - see
+        # https://github.com/google/flatbuffers/issues/9413. The data is
+        # intact, so the stricter check is opt-in.
         self.strict_size = strict_table_size
         # Offset of buf[0] within the enclosing allocation (4 after a size
         # prefix, the vector position for nested buffers): alignment is

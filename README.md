@@ -1,36 +1,88 @@
 # flatview
 
-Schema-driven FlatBuffers for Python. Load a `.fbs` or `.bfbs` schema at
-runtime and get lazy, zero-copy, Pythonic views over the data: no `flatc`
-code generation, no `FooLength()` / `Foo(j)` accessor pairs, and key lookup
-that actually exists.
+Schema-driven [FlatBuffers](https://flatbuffers.dev/) for Python. Load a
+`.fbs` or `.bfbs` schema at runtime and get lazy, zero-copy, Pythonic views
+over any FlatBuffer: no `flatc` code generation, no `FooLength()` / `Foo(j)`
+accessor pairs, binary-search key lookup, a full verifier, and an encoder
+that takes plain Python data.
+
+Pure Python (≥ 3.11), no runtime dependencies.
+
+## Quick start
+
+Given a schema, `shop.fbs` ([examples/shop.fbs](examples/shop.fbs)):
+
+```fbs
+namespace shop;
+
+enum Category : ubyte { Tool, Toy, Food }
+struct Dimensions { w: float; h: float; d: float; }
+
+table Product {
+  sku: string (key);
+  name: string (required);
+  price: double = null;   // optional: absent reads as None
+  stock: int;
+  category: Category;
+  size: Dimensions;
+  tags: [string];
+}
+
+table Catalog { products: [Product]; }
+root_type Catalog;
+file_identifier "SHOP";
+```
 
 ```python
 import flatview
 
-fb = flatview.open("types.fb")          # finds types.bfbs / types.fbs next to it
-rifter = fb.rows.lookup(587)            # binary search on the schema's `key` field
-rifter.name.en                          # 'Rifter'
-rifter.groupID, rifter.portionSize      # (25, 1)
-rifter.factionID                        # 500002
-rifter.metaLevel                        # 0  - present in the buffer
-fb.rows.lookup(0).basePrice             # None - `double = null`, absent means None, not 0.0
-rifter._asdict()                        # plain dicts/lists, recursively
+schema = flatview.load_schema("shop.fbs")            # or a .bfbs from flatc
+
+data = schema.encode({"products": [                  # Python data -> FlatBuffer bytes
+    {"sku": "T-100", "name": "Hammer", "price": 12.5, "stock": 40, "category": "Tool",
+     "size": {"w": 30.0, "h": 12.0, "d": 3.0}, "tags": ["steel", "claw"]},
+    {"sku": "F-007", "name": "Tea", "stock": 0, "category": "Food"},
+    {"sku": "K-042", "name": "Kite", "price": 20.0, "category": "Toy"},
+]})
+open("catalog.shop", "wb").write(data)
+
+fb = flatview.open("catalog.shop", schema)            # memory-mapped; decodes lazily
+products = fb.root.products
+products.keys()                  # ['F-007', 'K-042', 'T-100']  (keyed vectors are sorted on write)
+hammer = products.lookup("T-100")   # binary search on the `key` field
+hammer.name, hammer.price        # ('Hammer', 12.5)
+hammer.category.name             # 'Tool'  (an IntEnum member)
+w, h, d = hammer.size            # structs unpack like tuples
+list(hammer.tags)                # ['steel', 'claw']
+tea = products.lookup("F-007")
+tea.price, tea._has("price")     # (None, False)  optional scalar
+products.find("X-999")           # None
+tea._asdict(defaults=False, enums="name")
+# {'sku': 'F-007', 'name': 'Tea', 'category': 'Food'}
+fb.verify()                      # full structural check; raises on corruption
 ```
 
-Built and tested against CCP's EVE SDE FlatBuffers
-(`https://sde.evetech.net/tranquility/latest/`). All 104 SDE schemas parse
-identically from `.fbs` and `.bfbs`, and every SDE table tested decodes
-exactly like `flatc --json`, `types.fb` (150 MB) included.
+The runnable version is [examples/quickstart.py](examples/quickstart.py).
+The test suite runs it and checks its output.
+
+If the schema file sits next to the data with the same stem (`x.fb` and
+`x.bfbs`/`x.fbs`), `flatview.open("x.fb")` finds it on its own.
+
+**How it's tested:** every schema feature (structs, arrays, enums,
+bit_flags, unions and vectors of unions, nested flatbuffers, includes,
+optional scalars, size prefixes, file identifiers) is cross-checked against
+`flatc` in both directions. It is also tested on a large real-world
+dataset, the EVE Online SDE (see [the worked example](#worked-example-the-eve-online-sde)):
+all 104 of its schemas, and every table decoded identically to `flatc --json`.
 
 ## Why not the official `flatbuffers` package?
 
 | | official `flatbuffers` + `flatc --python` | flatview |
 |---|---|---|
 | Schema | generate code per schema, regenerate on change | load `.fbs`/`.bfbs` at runtime |
-| Field access | `r.Name().En().decode()`, `r.GroupId()` (names re-cased) | `r.name.en`, `r.groupID` (schema names) |
-| Vectors | `r.PlanetIdsLength()` + `r.PlanetIds(j)` | real `Sequence`: `len`, slicing, iteration, `.tolist()` |
-| Key lookup | none in Python, so a linear scan | `rows.lookup(587)`, `find`, `bisect`, `index_by`, `group_by` |
+| Field access | `p.Name().decode()`; names re-cased (`typeID` → `TypeId()`) | `p.name`; schema names as written |
+| Vectors | `p.TagsLength()` + `p.Tags(j)` | real `Sequence`: `len`, slicing, iteration, `.tolist()` |
+| Key lookup | none in Python, so a linear scan | `products.lookup("T-100")`, `find`, `bisect`, `index_by`, `group_by` |
 | Optional scalars (`= null`) | supported | `None` when absent, `_has(name)` for presence |
 | Enums | bare ints | `IntEnum` / `IntFlag` members |
 | Verifier | none | full: bounds, alignment, UTF-8, required, unions, key order, depth |
@@ -40,7 +92,9 @@ exactly like `flatc --json`, `types.fb` (150 MB) included.
 
 ### Speed
 
-`benchmarks/bench_vs_official.py`, best of several runs, same machine, SDE build 3720952:
+Measured on real data: the [EVE Online SDE](#worked-example-the-eve-online-sde)
+(build 3720952), whose `types.fb` is 150 MB with 53,941 rows.
+`benchmarks/bench_vs_official.py`, best of several runs, same machine:
 
 | Operation | flatview | official | speed-up |
 |---|---|---|---|
@@ -111,13 +165,14 @@ There are no runtime dependencies (Python ≥ 3.11). Tests that compare with
 ### Schemas
 
 ```python
-schema = flatview.load_schema("types.bfbs")   # or .fbs; gzip fine; format detected by content
+schema = flatview.load_schema("shop.bfbs")    # or .fbs; gzip fine; format detected by content
 schema = flatview.parse_fbs(text, "x.fbs", include_paths=[...])
-schema.root                     # <table sde.types.TypesTable>
-schema["Types"].fields          # short or fully-qualified names
-schema["Types"].key_field       # <Field typeID: int (id 0, key)>
-schema["DogmaEffectsModifierInfo"].field("func").attributes   # {'sde_enum_name': '0'}
-schema["EffectCategory"].python # IntEnum
+schema.root                     # <table shop.Catalog (1 fields)>
+schema["Product"].fields        # short or fully-qualified ("shop.Product") names
+schema["Product"].key_field     # <Field sku: string (id 0, required, key)>
+schema["Product"].field("price").optional   # True
+schema["Category"].python       # IntEnum
+field.attributes                # user-defined attributes, e.g. {'my_attr': 'value'}
 print(schema.to_fbs())          # e.g. turn a .bfbs back into readable .fbs
 ```
 
@@ -133,6 +188,7 @@ asked. If you need those, use the `.fbs`.
 fb = flatview.open(path, schema=None, verify=False, use_mmap=True)
 root = schema.read(data)          # bytes / bytearray / mmap / memoryview
 root = schema.read(data, "Other") # any table as root; size prefix auto-detected
+fb.products                       # shorthand for fb.root.products
 
 row.field / row["field"]          # value, default, or None
 row._has("field")                 # physically present in the buffer?
@@ -141,8 +197,8 @@ row._asdict(defaults=False, enums="name")   # like flatc --json
 pos.x, tuple(pos), x, y, z = pos  # structs are values (iterable, tuple-equal)
 vec[3], vec[-1], vec[2:10]        # slices are lazy views
 vec.tolist()                      # one C call for scalar vectors
-rows.lookup(k) / rows.find(k) / rows.bisect(k) / rows.keys() / rows.is_sorted()
-rows.index_by("name") / rows.group_by(lambda r: r.groupID)
+vec.lookup(k) / vec.find(k) / vec.bisect(k) / vec.keys() / vec.is_sorted()   # keyed tables
+vec.index_by("name") / vec.group_by(lambda p: p.category)                    # any field
 ```
 
 Helper names start with `_` (namedtuple style) so they can never hide a
@@ -156,7 +212,7 @@ Unions return the member table view (and `field_type` gives the enum member).
 ```python
 schema.verify(data, strict_enums=False, check_sorted=True, check_alignment=True,
               check_utf8=True, max_depth=64, strict_table_size=False)
-# raises VerificationError('rows[17].name.en: string is not valid UTF-8 ...')
+# raises VerificationError('products[17].name: string is not valid UTF-8 ...')
 ```
 
 `check_sorted` matters: FlatBuffers lookups assume keyed vectors are sorted,
@@ -166,14 +222,14 @@ memory-safe without verification (it's Python), but verify untrusted input.
 ### Writing
 
 ```python
-data = schema.encode({"rows": [{"typeID": 2, "name": {"en": "x"}}, ...]})
+data = schema.encode({"products": [{"sku": "A-1", "name": "Anvil", "category": "Tool"}, ...]})
 data = schema.encode(fb.root)                       # copy a view
 d = fb.root._asdict(defaults=False); ...; schema.encode(d)   # modify a copy
 ```
 
 Vectors of keyed tables are sorted by key (bytewise for strings, as
 FlatBuffers requires). Identical vtables and strings are written once. Every
-value is range-checked; enums accept names (`"Minmatar"`, or `"A B"` for
+value is range-checked; enums accept names (`"Tool"`, or `"A B"` for
 bit flags); unknown fields and missing required fields raise `EncodeError`
 with the path to the value, using your input indices. Optional scalars
 (`= null`) are written only when not `None`.
@@ -181,15 +237,31 @@ with the path to the value, using your input indices. Optional scalars
 ### CLI
 
 ```
-flatview info   types.fb
-flatview get    types.fb 587
-flatview dump   types.fb --jsonl --limit 5
-flatview verify typeDogma.fb --strict-enums
-flatview schema types.bfbs
-flatview encode schema.fbs data.json -o out.bin
+flatview encode shop.fbs catalog.json -o catalog.shop
+flatview info   catalog.shop -s shop.fbs      # -s is optional if catalog.fbs/.bfbs sits next to it
+flatview get    catalog.shop T-100 -s shop.fbs
+flatview dump   catalog.shop --jsonl --limit 5 -s shop.fbs
+flatview verify catalog.shop --strict-enums -s shop.fbs
+flatview schema shop.bfbs                     # print a binary schema as .fbs
 ```
 
-## Notes on the EVE SDE files
+## Worked example: the EVE Online SDE
+
+CCP publishes EVE Online's Static Data Export as FlatBuffers at
+`https://sde.evetech.net/tranquility/latest/`, with a `.fb`, `.fbs` and
+`.bfbs` per table. This is where most of the benchmarks above come from.
+
+```python
+fb = flatview.open("types.fb")          # finds types.bfbs next to it; gzip handled
+rifter = fb.rows.lookup(587)            # every SDE table is `rows: [X]` keyed by its ID
+rifter.name.en                          # 'Rifter'
+rifter.groupID, rifter.portionSize      # (25, 1)
+fb.rows.lookup(0).basePrice             # None: `double = null`, absent means None, not 0.0
+rifter._asdict()                        # plain dicts/lists, recursively
+```
+
+`scripts/fetch_sde_examples.py` downloads a set of tables for the
+`sde_full` tests and the benchmarks. Things worth knowing about these files:
 
 * CCP serves `.fb`, `.fbs` and `.bfbs` as raw gzip bodies under their plain
   names (no `Content-Encoding`). flatview detects compression by magic number.
@@ -200,11 +272,18 @@ flatview encode schema.fbs data.json -o out.bin
 * Custom attributes (`sde_value`, `sde_enum_name`, `sde_name`) describe how
   the JSONL form is shaped. They're exposed in `Field.attributes` /
   `EnumVal.attributes`.
-* Some SDE tables record a vtable table size 4 bytes short of a trailing
-  8-byte field (e.g. `blueprints` invention `probability`). The data is
-  intact, and flatc's verifier doesn't check field offsets against that size
-  either, so neither does flatview by default. `strict_table_size=True` will
-  flag it.
+* Some SDE tables share a vtable whose recorded table size is too small for
+  them. This is a bug in the Go FlatBuffers builder, which CCP's files are
+  written with: vtable de-duplication ignores the object size
+  ([google/flatbuffers#9413](https://github.com/google/flatbuffers/issues/9413)).
+  In `blueprints.fb`, one vtable (recorded size 16) is shared by
+  `Blueprints`, `Activity`, `ProductionActivity` and all 1,353
+  `InventionProduct` tables, which need 20 bytes because of their
+  `probability` double. The data is intact. flatc's C++ verifier only bounds
+  fields against the buffer, so it accepts these files, and so does flatview
+  by default. `strict_table_size=True` flags them, as flatcc's verifier would.
+  flatview's own builder compares the whole vtable, size included, so it
+  doesn't produce such files.
 
 ## Not supported (yet)
 

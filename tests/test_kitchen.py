@@ -9,7 +9,7 @@ import pytest
 import flatview
 from flatview import EncodeError, FlatBufferError, VerificationError
 
-from conftest import KITCHEN, close_enough, flatc_from_json, flatc_to_json, needs_flatc
+from conftest import KITCHEN, SDE, close_enough, flatc_from_json, flatc_to_json, needs_flatc
 
 SCHEMA_PATH = KITCHEN / "kitchen.fbs"
 
@@ -315,3 +315,29 @@ def test_asdict_same_for_bytes_and_memoryview(kitchen_schema, fleet, opts):
     assert a == b
     assert a["ships"][1]["blueprint"]["runs"] == 7               # nested buffer converted
     assert flatview.to_python(kitchen_schema.read(plain).ships, **opts) == a["ships"]
+
+
+def test_builder_does_not_share_vtables_across_sizes():
+    # Regression for google/flatbuffers#9413 (Go builder): tables whose field
+    # offsets match but whose sizes differ must not share a vtable.
+    s = flatview.parse_fbs("""
+        table Small { a: int; b: int; c: int; }
+        table Big { a: int; b: int; c: double; }
+        table R { small: [Small]; big: [Big]; }
+        root_type R;
+    """)
+    data = s.encode({"small": [{"a": 1, "b": 2, "c": 3}] * 3, "big": [{"a": 1, "b": 2, "c": 3.5}] * 3})
+    s.verify(data, strict_table_size=True)
+    r = s.read(data)
+    assert r.small[0]._vt != r.big[0]._vt
+    assert r.small[0]._vt == r.small[1]._vt          # same-size tables still share
+    assert r.big[2].c == 3.5
+
+
+def test_sde_shared_vtable_flagged_only_when_strict():
+    fb = flatview.open(SDE.parent / "sde-full" / "blueprints.fb") if (SDE.parent / "sde-full" / "blueprints.fb").exists() else None
+    if fb is None:
+        pytest.skip("run scripts/fetch_sde_examples.py first")
+    fb.verify()
+    with pytest.raises(VerificationError, match=r"invention\.products\[0\]\.probability.*past the end of its table"):
+        fb.verify(strict_table_size=True)

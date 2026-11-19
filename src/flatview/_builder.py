@@ -128,6 +128,9 @@ class Builder:
         """Write a table. ``items`` = [(field_id, kind, value, size)] where kind
         is a struct format char, "offset" (value = offset) or "struct" (value =
         (blob, minalign)). Returns the table's offset."""
+        # Align first, so padding left by the previous object is not counted in
+        # this table's size: identical tables then get identical vtables.
+        self.prep(max([4, *(_align_of(it) for it in items)]), 0)
         start = self.offset()
         locs: dict[int, int] = {}
         # Largest first: they are prepended, so this minimises padding.

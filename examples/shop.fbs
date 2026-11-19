@@ -1,0 +1,28 @@
+// A small, generic schema used by the README quick start.
+namespace shop;
+
+enum Category : ubyte { Tool, Toy, Food }
+
+struct Dimensions {
+  w: float;
+  h: float;
+  d: float;
+}
+
+table Product {
+  sku: string (key);
+  name: string (required);
+  price: double = null;   // optional: absent reads as None
+  stock: int;
+  category: Category;
+  size: Dimensions;
+  tags: [string];
+}
+
+table Catalog {
+  products: [Product];
+}
+
+root_type Catalog;
+file_identifier "SHOP";
+file_extension "shop";
