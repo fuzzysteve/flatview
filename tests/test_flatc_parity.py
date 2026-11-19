@@ -18,7 +18,7 @@ import flatview
 from flatview import BaseType, VerificationError, parse_fbs
 from flatview._builder import Builder
 
-from conftest import KITCHEN
+from conftest import FLATC, KITCHEN
 
 U = parse_fbs("""
     table A { a: int; }
@@ -142,7 +142,7 @@ def test_bit_flags_with_unknown_bits_keep_the_number():
 
 @pytest.mark.oracle
 @pytest.mark.skipif(os.environ.get("FLATVIEW_ORACLE") != "1", reason="set FLATVIEW_ORACLE=1 (builds flatc's C++)")
-@pytest.mark.skipif(not (shutil.which("flatc") and shutil.which("g++")), reason="needs flatc and g++")
+@pytest.mark.skipif(not (FLATC and shutil.which("g++")), reason="needs flatc and g++")
 def test_differential_fuzz_against_flatc():
     script = Path(__file__).parent.parent / "fuzz" / "verifier_parity.py"
     res = subprocess.run([sys.executable, str(script), "--seconds", "30", "--seed", "11"],
@@ -154,7 +154,7 @@ def test_differential_fuzz_against_flatc():
 
 @pytest.mark.oracle
 @pytest.mark.skipif(os.environ.get("FLATVIEW_ORACLE") != "1", reason="set FLATVIEW_ORACLE=1 (builds flatc's C++)")
-@pytest.mark.skipif(not (shutil.which("flatc") and shutil.which("g++")), reason="needs flatc and g++")
+@pytest.mark.skipif(not (FLATC and shutil.which("g++")), reason="needs flatc and g++")
 def test_encoder_fuzz_against_flatc():
     script = Path(__file__).parent.parent / "fuzz" / "encoder_parity.py"
     res = subprocess.run([sys.executable, str(script), "--seconds", "40", "--seed", "21"],

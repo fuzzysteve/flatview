@@ -1,0 +1,23 @@
+// A union whose members are a table, a string and a struct.
+namespace um;
+
+struct Point {
+  x: float;
+  y: double;
+  tag: ubyte;
+}
+
+table Label {
+  text: string;
+  size: int = 12;
+}
+
+union Payload { Label, Note: string, Point }
+
+table Message {
+  id: int;
+  body: Payload;
+  parts: [Payload];
+}
+
+root_type Message;

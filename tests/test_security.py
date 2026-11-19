@@ -5,6 +5,7 @@ import struct
 import importlib.util
 import json
 import os
+import sys
 import time
 import zlib
 from pathlib import Path
@@ -419,6 +420,7 @@ def test_empty_nested_flatbuffer_rejected():
 
 # 3. bounded reads of special files
 
+@pytest.mark.skipif(sys.platform == "win32", reason="no /dev/zero on Windows")
 def test_special_files_are_read_with_a_cap():
     s = parse_fbs("table T { a: int; } root_type T;")
     t = time.perf_counter()
@@ -776,3 +778,40 @@ def test_include_with_nul_byte(secret_tree):
     _, schemas = secret_tree
     with pytest.raises(SchemaError, match="NUL"):
         flatview.load_schema(_main(schemas, "common.fbs\\u0000"))
+
+
+# ---------------------------------------------------------------------------
+# the size cap must not cost a cap-sized allocation
+
+@pytest.mark.parametrize("kind", ["plain", "gzip", "zstd", "schema", "open-no-mmap"])
+def test_capped_reads_allocate_only_what_they_read(tmp_path, kind):
+    import tracemalloc
+    payload = (SDE / "categories.fbs").read_bytes()
+    p = tmp_path / "x.fbs"
+    if kind == "gzip":
+        p.write_bytes(_gz(payload))
+    elif kind == "zstd":
+        zstandard = pytest.importorskip("zstandard")
+        p.write_bytes(zstandard.ZstdCompressor().compress(payload))
+    else:
+        p.write_bytes(payload)
+    tracemalloc.start()
+    try:
+        if kind == "schema":
+            flatview.load_schema(p)
+        elif kind == "open-no-mmap":
+            data = tmp_path / "x.fb"
+            data.write_bytes(flatview.load_schema(p).encode({"rows": []}))
+            tracemalloc.reset_peak()
+            flatview.open(data, flatview.load_schema(p), use_mmap=False)
+        else:
+            assert flatview.read_bytes(p) == payload
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 16 << 20, f"{peak / 2**20:.0f} MB for a {len(payload)}-byte file"   # was 2048 MB
+
+
+def _gz(data: bytes) -> bytes:
+    z = zlib.compressobj(9, zlib.DEFLATED, 31)
+    return z.compress(data) + z.flush()

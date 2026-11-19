@@ -1,0 +1,36 @@
+// Schema evolution, version 2: only backwards-compatible changes to v1.fbs.
+namespace evo;
+
+enum Color : ubyte { Red, Green, Blue }        // new value
+
+table Weapon {
+  name: string;
+  damage: short = 10;
+  range: float = 1.5;                          // new field
+}
+
+table Shield {                                 // new table
+  strength: int;
+}
+
+union Item { Weapon, Shield }                  // new member
+
+table Ship {
+  name: string (key);
+  hp: int = 100;
+  color: Color = Green;
+  item: Item;
+  tags: [string];
+  legacy: int (deprecated);                    // deprecated, slot kept
+  speed: double = 2.5;                         // new fields, appended
+  armour: int = null;
+  crew: [string];
+  flagship: Ship;
+}
+
+table Fleet {
+  ships: [Ship];
+  motto: string;                               // new field
+}
+
+root_type Fleet;

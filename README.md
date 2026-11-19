@@ -1,5 +1,7 @@
 # flatview
 
+[![tests](https://github.com/fuzzysteve/flatview/actions/workflows/tests.yml/badge.svg)](https://github.com/fuzzysteve/flatview/actions/workflows/tests.yml)
+
 Schema-driven [FlatBuffers](https://flatbuffers.dev/) for Python. Load a
 `.fbs` or `.bfbs` schema at runtime and get lazy, zero-copy, Pythonic views
 over any FlatBuffer: no `flatc` code generation, no `FooLength()` / `Foo(j)`
@@ -94,16 +96,16 @@ all 104 of its schemas, and every table decoded identically to `flatc --json`.
 
 Measured on real data: the [EVE Online SDE](#worked-example-the-eve-online-sde)
 (build 3720952), whose `types.fb` is 150 MB with 53,941 rows.
-`benchmarks/bench_vs_official.py`, best of several runs, same machine:
+`benchmarks/bench_vs_official.py`, best of several runs, same machine (re-run November 2026):
 
 | Operation | flatview | official | speed-up |
 |---|---|---|---|
-| Scan 53,941 types, 4 fields each | 105 ms | 468 ms | 4.5× |
-| 1,000 lookups by typeID (official: one shared scan) | 13 ms | 261 ms | ~20× |
+| Scan 53,941 types, 4 fields each | 105 ms | 473 ms | 4.5× |
+| 1,000 lookups by typeID (official: one shared scan) | 13.5 ms | 266 ms | ~20× |
 | Single lookup, typeID 587 | ~0.01 ms | 1.1 ms | ~80× |
 | Sum one attribute over ~1M typeDogma entries | 0.57 s | 3.2 s | 5.7× |
-| All `planetIDs` vectors to lists | 19 ms | 205 ms | 11× |
-| Decode all of types.fb to Python objects | 0.81 s | 4.38 s | 5.4× |
+| All `planetIDs` vectors to lists | 19 ms | 207 ms | 11× |
+| Decode all of types.fb to Python objects | 0.80 s | 4.42 s | 5.5× |
 
 Why: each schema field becomes a generated property that does one vtable
 probe and one `struct.unpack_from`, with nothing worked out per call; scalar
@@ -120,14 +122,19 @@ opening the file; cells are wall time / peak Python heap.
 
 | Scenario | flatview | official | json |
 |---|---|---|---|
-| Look up one type (early id 587) | 0.7 ms / 0 MB | 76 ms / 143 MB | 4.0 ms / 0.1 MB |
-| Look up one type (last id) | 0.8 ms / 0 MB | 334 ms / 143 MB | 757 ms / 0.3 MB |
-| 1,000 lookups (others build an index first) | 20 ms / 0.1 MB | 355 ms / 153 MB | 917 ms / 262 MB |
-| Scan all rows, 4 fields | 186 ms / 0 MB | 774 ms / 143 MB | 782 ms / 0.3 MB |
-| Everything as Python objects | 780 ms / 215 MB | 4440 ms / 332 MB | 899 ms / 260 MB |
+| Look up one type (early id 587) | 1.4 ms / 0 MB | 77 ms / 143 MB | 4.0 ms / 0.1 MB |
+| Look up one type (last id) | 1.4 ms / 0 MB | 334 ms / 143 MB | 762 ms / 0.3 MB |
+| 1,000 lookups (others build an index first) | 21 ms / 0.1 MB | 358 ms / 153 MB | 906 ms / 262 MB |
+| Scan all rows, 4 fields | 189 ms / 0 MB | 767 ms / 143 MB | 784 ms / 0.3 MB |
+| Everything as Python objects | 785 ms / 215 MB | 4403 ms / 332 MB | 901 ms / 260 MB |
 
 For the official library, "everything as Python objects" means its object API
 (`--gen-object-api`); flatview and json produce plain dicts and lists.
+
+flatview's single-lookup time is mostly the fixed cost of `open()`: about
+0.9 ms to load `types.bfbs`, more than half of it verifying the schema file
+itself (see [Security](#security)). To skip that on repeated opens, load the
+schema once and pass it in: `flatview.open(path, schema)`.
 
 ### Memory
 
@@ -145,10 +152,26 @@ Uncompressed files are memory-mapped, so the file is never copied onto the
 heap. Pages you touch show up in RSS as clean page cache, which is shared
 and which the OS can drop.
 
+### Compatibility
+
+- **Schema evolution:** data written with an older schema reads correctly
+  with a newer one, and vice versa. New fields read as their defaults.
+  Unknown fields are ignored, and unknown enum values and union members come
+  back as plain ints / `None` (`tests/test_evolution.py`, cross-checked with
+  flatc).
+- **Old `.bfbs` files:** files written by flatc 1.12.0, 2.0.0 and 22.9.24
+  load and decode identically to the `.fbs` (`tests/test_old_bfbs.py`).
+- **Threads:** a schema can be shared between threads. Its lazily built
+  classes are built once and never seen half-built, and the suite also
+  passes on free-threaded Python 3.14.
+- **Not tested:** big-endian machines (all reads are explicitly
+  little-endian).
+
 ## Install / develop
 
 ```bash
 uv sync                       # creates .venv with pytest
+uv run python scripts/get_flatc.py   # fetch the flatc the cross-checks use (latest release, pinned)
 uv run pytest                 # full suite
 uv run pytest -m "not sde_full"   # skip the big-file tests (fast, ~1 s)
 uv run python scripts/fetch_sde_examples.py   # fetch SDE files for sde_full tests/benchmarks
@@ -311,8 +334,9 @@ it's up to you:
 
 ## Differential testing against flatc
 
-`fuzz/` checks flatview against flatc itself. It needs `flatc` and `g++`;
-the first run downloads the matching flatbuffers source into `fuzz/.cache/`.
+`fuzz/` checks flatview against flatc itself: the latest release (25.12.19),
+pinned in `scripts/get_flatc.py`. It needs `g++` as well. The first run
+downloads the matching flatbuffers source into `fuzz/.cache/`.
 
 ```bash
 uv run python fuzz/verifier_parity.py --seconds 120   # mutated buffers vs flatc's generated C++ verifier + JSON
@@ -337,8 +361,11 @@ identically, except where flatview is deliberately stricter:
 - zero offsets in vector elements, which flatc follows to the slot itself;
 - deprecated fields, which flatc skips but flatview still lets you read.
 
-The `.fbs` parser accepts and rejects what flatc does, except where flatc
-has bugs or writes broken output:
+The `.fbs` parser accepts and rejects what flatc does. That includes
+flatc 25.12's string and empty-vector defaults (`s: string = "x"`,
+`v: [int] = []`). As in flatc's reflection data and JSON, those defaults
+aren't materialised: an absent field still reads as `None`. The exceptions
+are cases where flatc has bugs or writes broken output:
 - a struct containing itself;
 - `enum E : E`;
 - duplicate enum values that flatc's uniqueness check misses;

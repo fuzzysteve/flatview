@@ -37,7 +37,7 @@ sys.path.insert(0, str(HERE))
 
 import flatview  # noqa: E402
 from flatview import BaseType  # noqa: E402
-from oracle import CACHE, Oracle  # noqa: E402
+from oracle import CACHE, FLATC, Oracle  # noqa: E402
 from verifier_parity import normalise, same  # noqa: E402
 
 FINDINGS = CACHE / "findings" / "encoder"
@@ -429,7 +429,7 @@ def flatc_encode(fbs: Path, value, tmp: Path) -> tuple[bytes | None, str]:
     out = tmp / "value.bin"
     if out.exists():
         out.unlink()
-    r = subprocess.run(["flatc", "-b", "-o", str(tmp), str(fbs), str(j)], capture_output=True, text=True)
+    r = subprocess.run([FLATC, "-b", "-o", str(tmp), str(fbs), str(j)], capture_output=True, text=True)
     if r.returncode != 0 or not out.exists():
         msg = (r.stderr or r.stdout).strip().splitlines()
         return None, (msg[-1] if msg else f"exit {r.returncode}")
@@ -470,7 +470,7 @@ def run(seconds: float, seed: int, per_schema: int) -> int:
             d.mkdir()
             fbs = d / "s.fbs"
             fbs.write_text(text)
-            chk = subprocess.run(["flatc", "--schema", "-b", "-o", str(d), str(fbs)], capture_output=True, text=True)
+            chk = subprocess.run([FLATC, "--schema", "-b", "-o", str(d), str(fbs)], capture_output=True, text=True)
             if chk.returncode != 0:
                 stats["schemas-flatc-rejected"] += 1      # generator produced something flatc refuses
                 continue

@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import urllib.request
@@ -26,13 +27,19 @@ from pathlib import Path
 import flatview
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "scripts"))
+import get_flatc  # noqa: E402
+
+#: The flatc to compare against: the pinned release (scripts/get_flatc.py) if
+#: fetched, else $FLATVIEW_FLATC or PATH.
+FLATC = get_flatc.resolve() or "flatc"
 CACHE = HERE / ".cache"
 LIB_SOURCES = ("idl_parser", "idl_gen_text", "reflection", "util")
 _NONFINITE = re.compile(r"([:\[,]\s*)(-?)(nan|inf|infinity)(?=\s*[,\]}])")
 
 
 def flatc_version() -> str:
-    out = subprocess.run(["flatc", "--version"], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([FLATC, "--version"], capture_output=True, text=True, check=True).stdout
     m = re.search(r"(\d+\.\d+\.\d+)", out)
     if not m:
         raise RuntimeError(f"cannot parse flatc version from {out!r}")
@@ -47,14 +54,16 @@ def flatbuffers_source() -> Path:
     if lib.exists():
         return root
     CACHE.mkdir(exist_ok=True)
-    url = f"https://github.com/google/flatbuffers/archive/refs/tags/v{ver}.tar.gz"
+    # release tags aren't always "v<version>" (25.12.19's is v25.12.19-2026-02-06-03fffb2)
+    tag = get_flatc.FLATC_TAG if ver == get_flatc.FLATC_VERSION else f"v{ver}"
+    url = f"https://github.com/google/flatbuffers/archive/refs/tags/{tag}.tar.gz"
     req = urllib.request.Request(url, headers={"User-Agent": "flatview-fuzz-oracle"})
     with urllib.request.urlopen(req, timeout=120) as r:
         data = r.read()
     with tempfile.TemporaryDirectory(dir=CACHE) as tmp:
         with tarfile.open(fileobj=io.BytesIO(data)) as tf:
             tf.extractall(tmp, filter="data")
-        src = Path(tmp) / f"flatbuffers-{ver}"
+        src = next(Path(tmp).glob("flatbuffers-*"))
         objs = []
         for name in LIB_SOURCES:
             obj = Path(tmp) / f"{name}.o"
@@ -83,7 +92,7 @@ def build(fbs: Path) -> Path:
     if binary.exists():
         return binary
     out.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["flatc", "--cpp", "--gen-all", "-o", str(out), "-I", str(fbs.parent), str(fbs)],
+    subprocess.run([FLATC, "--cpp", "--gen-all", "-o", str(out), "-I", str(fbs.parent), str(fbs)],
                    check=True, capture_output=True)
     header = f"{fbs.stem}_generated.h"
     ns = schema.root.namespace.replace(".", "::")

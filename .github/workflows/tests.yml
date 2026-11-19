@@ -1,0 +1,53 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, python: "3.11" }
+          - { os: ubuntu-latest, python: "3.12" }
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: ubuntu-latest, python: "3.14" }
+          - { os: macos-latest, python: "3.13" }
+          - { os: windows-latest, python: "3.13" }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Fetch the pinned flatc (latest release; see scripts/get_flatc.py)
+        run: uv run --no-project python scripts/get_flatc.py
+      - run: uv sync
+      - name: Tests (the full-SDE tests need downloads, so they're skipped here)
+        run: uv run pytest -m "not sde_full"
+
+  free-threaded:
+    name: ubuntu-latest / Python 3.14t (no GIL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+      - name: Fetch the pinned flatc (latest release; see scripts/get_flatc.py)
+        run: uv run --no-project python scripts/get_flatc.py
+      - name: Tests
+        run: >
+          uv run --isolated --no-project --python 3.14t --with pytest --with-editable .
+          python -m pytest -m "not sde_full"

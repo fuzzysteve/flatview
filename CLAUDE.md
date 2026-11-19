@@ -17,7 +17,13 @@ uv run --group bench python benchmarks/bench_three_way.py   # also needs the SDE
 uv run --group bench python benchmarks/bench_memory.py
 ```
 
-`flatc` must be on PATH for the cross-check tests; they are skipped without it.
+Cross-checks compare against the latest flatc release, pinned in `scripts/get_flatc.py`
+(currently 25.12.19). Run `uv run python scripts/get_flatc.py` once to fetch it into `.tools/`.
+Tests and fuzzers use it in preference to whatever `flatc` is on PATH (`FLATVIEW_FLATC`
+overrides it), and pytest's header shows which flatc it used. Without any flatc the
+cross-check tests are skipped. To move to a newer flatc, bump the pin and re-run the
+fuzzers. CI (`.github/workflows/tests.yml`) runs the fast suite with the pinned flatc on Linux
+(Python 3.11-3.14 and free-threaded 3.14t), macOS and Windows on every push.
 The official `flatbuffers` package lives only in the `bench` dependency group. The
 library itself has no runtime dependencies; keep it that way.
 
@@ -57,6 +63,12 @@ library itself has no runtime dependencies; keep it that way.
 - The verifier's defaults match flatc's C++ verifier (fields are bounded by the buffer).
   `strict_table_size=True` is the stricter flatcc-style check. Alignment is relative to
   the start of the whole buffer, so size-prefixed and nested buffers carry a `base`.
+- Lazily built per-schema state must be thread-safe. View classes are built under
+  `_BUILD_LOCK` and published on the `Object` only when complete (`_BUILDING` holds the
+  in-progress class for the building thread). Python enums are built once under
+  `_ENUM_LOCK`. `tests/test_threads.py` checks this, and the suite passes on free-threaded
+  Python (`uv run --isolated --no-project --python 3.14t --with pytest --with-editable .
+  python -m pytest`).
 - View helper methods are `_`-prefixed (namedtuple style) so they never shadow schema
   fields. Fields named `__x...` never become attributes (they would replace Python
   protocol methods); they are reachable as `view["__x"]`.

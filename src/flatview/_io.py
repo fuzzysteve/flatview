@@ -58,11 +58,16 @@ def _unzstd(data: bytes, path: str, limit: int) -> bytes:
             import zstandard  # type: ignore
         except ImportError:
             raise OSError(f"{path} is zstd-compressed; install 'zstandard' or use Python 3.14+") from None
+        out = bytearray()
         with zstandard.ZstdDecompressor().stream_reader(data, read_across_frames=True) as r:
-            out = r.read(limit + 1)
-        if len(out) > limit:
-            raise _too_big(path, limit)
-        return out
+            while True:            # chunked: read(limit + 1) would allocate limit bytes up front
+                chunk = r.read(min(_CHUNK, limit + 1 - len(out)))
+                if not chunk:
+                    break
+                out += chunk
+                if len(out) > limit:
+                    raise _too_big(path, limit)
+        return bytes(out)
     out = bytearray()
     while data:
         d = zstd.ZstdDecompressor()              # one frame
@@ -95,13 +100,47 @@ def read_bytes(path: PathLike, max_size: int = MAX_DECOMPRESSED) -> bytes:
     return _decompress(data, os.fspath(path), max_size)
 
 
+_CHUNK = 1 << 20
+
+
 def _read_capped(fh, path: str, limit: int) -> bytes:
-    """Read a whole file, but never more than ``limit`` bytes: special files
-    such as /dev/zero or a FIFO have no size and would otherwise exhaust memory."""
-    data = fh.read(limit + 1)
-    if len(data) > limit:
-        raise _too_big(path, limit)
-    return data
+    """Read the rest of a file, but never more than ``limit`` bytes: special
+    files such as /dev/zero or a FIFO have no size and would otherwise exhaust
+    memory.
+
+    Never asks for ``limit`` bytes in one call: CPython's ``read(n)``
+    allocates ``n`` bytes up front, and with the 2 GiB default that is a 2 GiB
+    allocation per read (slow everywhere, and a MemoryError where memory isn't
+    overcommitted). Regular files are read at their actual size; others in
+    chunks.
+    """
+    try:
+        st = os.fstat(fh.fileno())
+        size = st.st_size - fh.tell() if stat.S_ISREG(st.st_mode) else None
+    except (OSError, AttributeError, ValueError):
+        size = None
+    if size is not None:
+        if size > limit:
+            raise _too_big(path, limit)
+        data = fh.read(size + 1)               # +1 notices a file that grew meanwhile
+        if len(data) > limit:
+            raise _too_big(path, limit)
+        if len(data) <= size:
+            return data
+        rest = _read_chunks(fh, path, limit - len(data))
+        return data + rest
+    return _read_chunks(fh, path, limit)
+
+
+def _read_chunks(fh, path: str, limit: int) -> bytes:
+    out = bytearray()
+    while True:
+        chunk = fh.read(min(_CHUNK, limit + 1 - len(out)))
+        if not chunk:
+            return bytes(out)
+        out += chunk
+        if len(out) > limit:
+            raise _too_big(path, limit)
 
 
 def load_schema(source: PathLike | bytes | Schema, include_paths: list[str] | None = None,

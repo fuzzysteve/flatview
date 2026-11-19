@@ -18,7 +18,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import flatview  # noqa: E402
-from oracle import CACHE, HERE as _H, flatbuffers_source  # noqa: E402
+from oracle import CACHE, FLATC, HERE as _H, flatbuffers_source  # noqa: E402
 
 
 def debug_build(fbs: Path) -> Path:
@@ -30,7 +30,7 @@ def debug_build(fbs: Path) -> Path:
     if binary.exists():
         return binary
     out.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["flatc", "--cpp", "--gen-all", "-o", str(out), "-I", str(fbs.parent), str(fbs)],
+    subprocess.run([FLATC, "--cpp", "--gen-all", "-o", str(out), "-I", str(fbs.parent), str(fbs)],
                    check=True, capture_output=True)
     ns = schema.root.namespace.replace(".", "::")
     verify = f"{ns + '::' if ns else ''}Verify{schema.root.short_name}Buffer"

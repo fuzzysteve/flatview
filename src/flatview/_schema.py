@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import enum
 import struct
+import threading
 from dataclasses import dataclass, field as dc_field
 from typing import Any, Iterator
 
@@ -88,6 +89,9 @@ TYPE_NAMES = {
     "double": BaseType.DOUBLE, "float64": BaseType.DOUBLE,
     "string": BaseType.STRING,
 }
+
+
+_ENUM_LOCK = threading.Lock()
 
 
 class SchemaError(Exception):
@@ -275,6 +279,12 @@ class Enum:
 
     @property
     def python_or_none(self) -> type | None:
+        if self._py is None:
+            with _ENUM_LOCK:          # build once: one class per enum, so `is` checks hold
+                return self._build_python()
+        return self._py or None
+
+    def _build_python(self) -> type | None:
         if self._py is None:
             try:
                 members = [(v.name, v.value) for v in self.values]

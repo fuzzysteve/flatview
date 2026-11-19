@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 import flatview  # noqa: E402
 from conftest import normalise  # noqa: E402
-from oracle import CACHE  # noqa: E402
+from oracle import CACHE, FLATC  # noqa: E402
 
 FINDINGS = CACHE / "findings" / "schema"
 KITCHEN_DIR = ROOT / "tests" / "data" / "kitchen"
@@ -81,6 +81,11 @@ CORPUS = [
     "/* block */ table T { a: int; /* inline */ } // trailing\nroot_type T;",
     "table T { a: string = \"default\"; } root_type T;",
     "table T { a: [int] = []; } root_type T;",
+    "table T { a: string = 'single'; b: [string] = []; c: [int] = [1]; } root_type T;",
+    "table T { a: string = 5; } root_type T;",
+    "attribute 'quoted'; table T { a: int (quoted: 'v'); } root_type T;",
+    "union U { A, T } table A { a: int; } table B { T: int; } table T { u: U; } root_type T;",
+    "table A { a: int; } table B { T: int; } union U { A, T } table T { u: U; } root_type T;",
     "table T { a: int; } table U { t: T; } rpc_service S { M(T): U; } root_type T;",
     "table T { a: int8; b: uint8; c: int16; d: uint16; e: int32; f: uint32; g: int64; h: uint64; i: float32; j: float64; } root_type T;",
     "table T { a: int; } namespace; table U { t: T; } root_type U;",
@@ -175,7 +180,7 @@ def run_flatc(path: Path, outdir: Path) -> tuple[bool, str, bytes | None]:
     for f in outdir.glob("*.bfbs"):
         f.unlink()
     try:
-        res = subprocess.run(["flatc", "--schema", "-b", "--bfbs-builtins", "--bfbs-comments", "-o", str(outdir),
+        res = subprocess.run([FLATC, "--schema", "-b", "--bfbs-builtins", "--bfbs-comments", "-o", str(outdir),
                               "-I", str(path.parent), str(path)], capture_output=True, text=True, timeout=20)
     except subprocess.TimeoutExpired:
         return False, "flatc timed out", None

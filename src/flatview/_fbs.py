@@ -41,7 +41,7 @@ _TOKEN = re.compile(r"""
     (?P<ws>[ \t\r\n]+)
   | (?P<doc>///[^\n]*)
   | (?P<comment>//[^\n]*|/\*.*?\*/)
-  | (?P<string>"(?:[^"\\]|\\.)*")
+  | (?P<string>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')
   | (?P<number>[-+]?(?:0[xX](?:[0-9a-fA-F]+\.?[0-9a-fA-F]*|\.[0-9a-fA-F]+)(?:[pP][-+]?\d+)?
                        |(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?))
   | (?P<ident>[-+]?[A-Za-z_][A-Za-z0-9_]*)
@@ -125,6 +125,7 @@ class _EnumDecl:
     file: str
     line: int
     order: int = 0
+    seq: int = 0            # parse position (union members count as references from here)
 
 
 @dataclass
@@ -134,7 +135,7 @@ class _Ctx:
     root: tuple[str, str, str, int, int] | None = None   # (name, namespace, file, line, order)
     roots: list[tuple[str, str, str, int, int]] = dc_field(default_factory=list)  # every root_type
     seq: int = 0
-    services: list[tuple[str, str, str, int]] = dc_field(default_factory=list)  # (type, ns, file, line)
+    services: list[tuple[str, str, str, int, int]] = dc_field(default_factory=list)  # (type, ns, file, line, seq)
     decl_count: int = 0
     file_ident: str | None = None
     file_ext: str | None = None
@@ -410,6 +411,8 @@ class _Parser:
     def parse_enum(self) -> None:
         start = self.next()
         is_union = start.text == "union"
+        self.ctx.seq += 1
+        enum_seq = self.ctx.seq
         name = self.ident()
         underlying = None
         if self.accept(":"):
@@ -441,7 +444,7 @@ class _Parser:
         self.ctx.decl_count += 1
         self.ctx.enums.append(_EnumDecl(self.qualify(name), self.ns, is_union, underlying,
                                         values, attrs, start.docs, self.file, start.line,
-                                        self.ctx.decl_count))
+                                        self.ctx.decl_count, enum_seq))
 
     def parse_service(self) -> None:
         """rpc_service Name (attrs)? { Method(Request): Response (attrs)?; ... }
@@ -456,11 +459,13 @@ class _Parser:
             self.ident()
             self.expect("(")
             req = self.tok
-            self.ctx.services.append((self.dotted(), self.ns, self.file, req.line))
+            self.ctx.seq += 1
+            self.ctx.services.append((self.dotted(), self.ns, self.file, req.line, self.ctx.seq))
             self.expect(")")
             self.expect(":")
             resp = self.tok
-            self.ctx.services.append((self.dotted(), self.ns, self.file, resp.line))
+            self.ctx.seq += 1
+            self.ctx.services.append((self.dotted(), self.ns, self.file, resp.line, self.ctx.seq))
             self.parse_attrs()
             self.expect(";")
 
@@ -563,7 +568,7 @@ class _Resolver:
         for d in ctx.objects:
             if not d.is_struct:
                 self.check_nested(schema.objects[d.name], d)
-        for name, ns, file, line in ctx.services:
+        for name, ns, file, line, _seq in ctx.services:
             t = self.lookup(name, ns, f"{file}:{line}")
             if not isinstance(t, Object) or t.is_struct:
                 raise SchemaError(f"{file}:{line}: rpc request and response types must be tables: {name}")
@@ -704,6 +709,8 @@ class _Resolver:
                 raise SchemaError(f"{where}: default values are not supported for struct fields, table "
                                   "fields, or in structs")
             self.set_default(f, fd, where)
+            if d.is_struct:
+                f.optional = False    # a struct's fields are always present (as flatc >= 25.12 records)
             if ftype.item == BaseType.UNION:
                 if d.is_struct:
                     raise SchemaError(f"{where}: unions are not allowed in structs")
@@ -753,8 +760,9 @@ class _Resolver:
         obj._key = False
 
     def known_object_named(self, name: str, ns: str, seq: int) -> bool:
-        """flatc: a field may not be named like a table/struct it already knows
-        (declared, or referenced by an earlier field), resolved from ``ns``."""
+        """flatc: a field may not be named like a table/struct it already knows,
+        resolved from ``ns``: declared, or referenced earlier by a field type, a
+        union member or an rpc_service request/response type."""
         if self._first_seen is None:
             first: dict[str, int] = {}
             for d in self.ctx.objects:
@@ -772,6 +780,21 @@ class _Resolver:
                         continue
                     if isinstance(ref, Object):
                         first[ref.name] = min(first.get(ref.name, fd.seq), fd.seq)
+
+            def seen(type_name: str, ns: str, at: int) -> None:
+                try:
+                    ref = self.lookup(type_name, ns, "")
+                except SchemaError:
+                    return
+                if isinstance(ref, Object):
+                    first[ref.name] = min(first.get(ref.name, at), at)
+            for e in self.ctx.enums:
+                if e.is_union:
+                    for v in e.values:
+                        if v.union_type and v.union_type != "string":
+                            seen(v.union_type, e.namespace, e.seq)
+            for type_name, ns, _file, _line, at in self.ctx.services:
+                seen(type_name, ns, at)
             self._first_seen = first
         try:
             ref = self.lookup(name, ns, "")
@@ -812,10 +835,22 @@ class _Resolver:
             if f.key and bt == BaseType.STRING:
                 f.required = True  # flatc: string keys are implicitly required
             f.optional = not f.required
-            if raw is not None:
-                # flatc: "Default values for strings and vectors are not supported"
-                raise SchemaError(f"{where}: default values for strings, vectors and tables are not supported")
-            return
+            if raw is None:
+                return
+            # flatc >= 25.12 accepts a string literal for strings and `[]` for
+            # vectors. Reflection doesn't record the value (only that the field
+            # is no longer optional), and flatc's JSON doesn't print it, so
+            # flatview accepts it the same way: an absent field still reads as None.
+            if bt == BaseType.STRING and raw[:1] in "\"'":
+                f.optional = False
+                return
+            if bt == BaseType.VECTOR and raw == "[]":
+                f.optional = False
+                return
+            if bt == BaseType.STRING:
+                raise SchemaError(f"{where}: type mismatch: a string default must be a string literal")
+            raise SchemaError(f"{where}: default values are only supported for scalars, strings "
+                              "(a string literal) and vectors (`[]`)")
         if raw == "null":
             f.optional = True
             f.default = None

@@ -3,6 +3,7 @@ import math
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -17,8 +18,21 @@ SDE_SCHEMAS = DATA / "sde-schemas"  # every SDE table's .fbs and .bfbs
 SDE_FULL = DATA / "sde-full"        # optional: scripts/fetch_sde_examples.py
 KITCHEN = DATA / "kitchen"
 
-FLATC = shutil.which("flatc")
-needs_flatc = pytest.mark.skipif(FLATC is None, reason="flatc not on PATH")
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+import get_flatc  # noqa: E402
+
+# The pinned flatc (scripts/get_flatc.py) when it has been fetched, else PATH.
+FLATC = get_flatc.resolve()
+needs_flatc = pytest.mark.skipif(FLATC is None, reason="no flatc: run scripts/get_flatc.py")
+
+
+def pytest_report_header(config):
+    if FLATC is None:
+        return "flatc: none (cross-check tests skipped; run scripts/get_flatc.py)"
+    ver = subprocess.run([FLATC, "--version"], capture_output=True, text=True).stdout.strip()
+    pinned = get_flatc.FLATC_VERSION
+    note = "" if pinned in ver else f"  (NOT the pinned {pinned}: run scripts/get_flatc.py)"
+    return f"flatc: {FLATC} - {ver}{note}"
 
 
 def sde_tables(directory: Path) -> list[str]:

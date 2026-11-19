@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import enum
 import struct
+import threading
 from collections.abc import Sequence
 from typing import Any, Callable, Iterator
 
@@ -463,12 +464,29 @@ _MISSING = object()
 # ==========================================================================
 # Code generation of view classes
 
+# Classes are built under one re-entrant lock and published on the Object
+# only once complete: another thread must never see a half-built class (one
+# without its getters or _key_reader). _BUILDING lets the building thread see
+# its own unfinished class, should a recursive schema need it during the build.
+_BUILD_LOCK = threading.RLock()
+_BUILDING: dict[int, type] = {}
+
+
 def view_class(schema: Schema, obj: Object) -> type:
-    """The (cached) generated view class for a table/struct."""
+    """The (cached) generated view class for a table/struct. Thread-safe."""
     cls = obj.view_class
-    if cls is None:
-        cls = _build_struct_class(schema, obj) if obj.is_struct else _build_table_class(schema, obj)
-    return cls
+    if cls is not None:
+        return cls
+    with _BUILD_LOCK:
+        cls = obj.view_class or _BUILDING.get(id(obj))
+        if cls is not None:
+            return cls
+        try:
+            cls = _build_struct_class(schema, obj) if obj.is_struct else _build_table_class(schema, obj)
+        finally:
+            _BUILDING.pop(id(obj), None)
+        obj.view_class = cls          # publish only when complete
+        return cls
 
 
 def _enum_converter(enum: Enum | None) -> Callable | None:
@@ -497,7 +515,7 @@ def _build_table_class(schema: Schema, obj: Object) -> type:
     ns: dict[str, Any] = {"__slots__": (), "_object": obj, "_schema": schema}
     cls = type(obj.short_name, (TableView,), ns)
     cls.__qualname__ = obj.name
-    obj.view_class = cls  # set early: recursive schemas reference themselves
+    _BUILDING[id(obj)] = cls  # visible to this (building) thread only; see view_class
     getters: dict[str, Callable] = {}
     slots: dict[str, int] = {}
     for f in obj.fields:
@@ -740,7 +758,7 @@ def _build_struct_class(schema: Schema, obj: Object) -> type:
     ns: dict[str, Any] = {"__slots__": (), "_object": obj, "_schema": schema}
     cls = type(obj.short_name, (StructView,), ns)
     cls.__qualname__ = obj.name
-    obj.view_class = cls
+    _BUILDING[id(obj)] = cls
     getters: dict[str, Callable] = {}
     for f in obj.fields:
         g = _struct_getter(schema, f)
