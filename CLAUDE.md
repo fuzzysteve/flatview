@@ -98,8 +98,8 @@ library itself has no runtime dependencies; keep it that way.
 
 ## Differential testing (fuzz/)
 
-`fuzz/verifier_parity.py` and `fuzz/schema_parity.py` compare against flatc's own C++ and
-parser (README, "Differential testing"). Any "ours-accepts-flatc-rejects" or decode
+`fuzz/verifier_parity.py`, `fuzz/schema_parity.py` and `fuzz/encoder_parity.py` compare
+against flatc's own C++, parser and encoder (README, "Differential testing"). Any "ours-accepts-flatc-rejects" or decode
 difference is a bug. Pin each fixed case in `tests/test_flatc_parity.py` (verifier) or
 the `CORPUS` list (schemas), and keep the README's list of intentional differences
 current.

@@ -317,9 +317,19 @@ the first run downloads the matching flatbuffers source into `fuzz/.cache/`.
 ```bash
 uv run python fuzz/verifier_parity.py --seconds 120   # mutated buffers vs flatc's generated C++ verifier + JSON
 uv run python fuzz/schema_parity.py --seconds 120     # mutated .fbs vs flatc --schema -b
+uv run python fuzz/encoder_parity.py --seconds 120    # random schemas + values, encoded both ways
 uv run python fuzz/explain.py schema.fbs buf.bin      # where flatc's verifier rejects a buffer
 FLATVIEW_ORACLE=1 uv run pytest -m oracle             # short verifier fuzz as a test
 ```
+
+The encoder fuzzer generates random schemas (enums and bit flags, unions,
+structs with arrays, optional scalars, defaults, keyed vectors) and edge-case
+values. Every buffer flatview encodes must pass flatc's verifier and print
+the same, and every buffer flatc encodes must read back to the same value.
+It doesn't yet generate vectors of unions, nested flatbuffers or string
+union members. Elements with *equal* keys may come back in a different order
+from flatc (FlatBuffers leaves that unspecified), and flatc drops the sign
+of a `-0.0` that equals a `0.0` default. The comparison allows for both.
 
 The verifier accepts exactly what flatc's verifier accepts and decodes
 identically, except where flatview is deliberately stricter:

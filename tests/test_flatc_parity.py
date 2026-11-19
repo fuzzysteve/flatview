@@ -150,3 +150,14 @@ def test_differential_fuzz_against_flatc():
     assert res.returncode == 0, res.stderr
     assert "ours-accepts-flatc-rejects" not in res.stdout, res.stdout
     assert "decode-differs" not in res.stdout and "decode-ours-fails" not in res.stdout, res.stdout
+
+
+@pytest.mark.oracle
+@pytest.mark.skipif(os.environ.get("FLATVIEW_ORACLE") != "1", reason="set FLATVIEW_ORACLE=1 (builds flatc's C++)")
+@pytest.mark.skipif(not (shutil.which("flatc") and shutil.which("g++")), reason="needs flatc and g++")
+def test_encoder_fuzz_against_flatc():
+    script = Path(__file__).parent.parent / "fuzz" / "encoder_parity.py"
+    res = subprocess.run([sys.executable, str(script), "--seconds", "40", "--seed", "21"],
+                         capture_output=True, text=True, timeout=900)
+    assert res.returncode == 0, res.stderr
+    assert "findings (kind, bucket): count" in res.stdout and res.stdout.rstrip().endswith("none"), res.stdout
