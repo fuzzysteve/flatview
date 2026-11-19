@@ -294,6 +294,12 @@ it's up to you:
 * **Schema names.** Enum value names that Python's `enum` module reserves
   (`_missing_`, `mro`, dunders) make that enum read as plain ints rather
   than fail, and fields named `__x__` are reachable only as `view["__x__"]`.
+* **Terminal output.** The CLI never prints control characters from the
+  data raw. `dump`/`get` escape C1 controls (e.g. U+009B, a one-character
+  CSI), DEL, bidi overrides and U+2028/9 as `\uXXXX`, which keeps the JSON
+  exact. `to_fbs()` escapes them in strings too. `flatview schema` also
+  neutralises doc comments when writing to a terminal, and leaves redirected
+  output untouched.
 * **Memory-mapped files.** If another process truncates a file in place
   while it's open, Python crashes with SIGBUS (true of any mmap). Replacing
   files by atomic rename is safe. `open(..., use_mmap=False)` avoids mmap

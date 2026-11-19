@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from flatview.__main__ import main
 
 from conftest import SDE
@@ -39,3 +41,64 @@ def test_schema_and_encode(tmp_path, capsys):
     capsys.readouterr()
     assert main(["get", str(out), "20"]) == 0
     assert json.loads(capsys.readouterr().out)["compressedTypeID"] == 1
+
+
+# --- untrusted strings must not reach the terminal raw ----------------------
+
+import re
+import sys
+
+import flatview
+
+HOSTILE = "a\x1b[2Jb\x9b31mc\u202edcba\u2028e\x7ff\u2066g"
+RAW_UNSAFE = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]")
+
+
+@pytest.fixture
+def hostile_files(tmp_path):
+    schema = tmp_path / "h.fbs"
+    schema.write_text(
+        'attribute "note";\n'
+        f"/// doc {HOSTILE}\n"
+        'table T (note: "x\\u009by\\u202ez") { name: string; tags: [string]; }\n'
+        'root_type T;\nfile_identifier "\\u009bAB";\n', encoding="utf-8")
+    s = flatview.load_schema(schema)
+    data = tmp_path / "h.bin"
+    data.write_bytes(s.encode({"name": HOSTILE, "tags": [HOSTILE, "plain"]}))
+    return schema, data
+
+
+@pytest.mark.parametrize("args", [["dump"], ["dump", "--jsonl", "--path", "tags"]])
+def test_dump_escapes_terminal_controls_losslessly(hostile_files, capsys, args):
+    schema, data = hostile_files
+    assert main([args[0], str(data), "-s", str(schema), *args[1:]]) == 0
+    out = capsys.readouterr().out
+    assert not RAW_UNSAFE.search(out)
+    if "--jsonl" in args:
+        assert [json.loads(line) for line in out.splitlines()] == [HOSTILE, "plain"]
+    else:
+        assert json.loads(out) == {"name": HOSTILE, "tags": [HOSTILE, "plain"]}
+
+
+def test_info_escapes_identifier(hostile_files, capsys):
+    schema, data = hostile_files
+    assert main(["info", str(data), "-s", str(schema)]) == 0
+    out = capsys.readouterr().out
+    assert not RAW_UNSAFE.search(out) and "ident:   \\u009bAB" in out
+
+
+@pytest.mark.parametrize("tty", [True, False])
+def test_schema_output(hostile_files, capsys, monkeypatch, tty):
+    schema, _ = hostile_files
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: tty)
+    assert main(["schema", str(schema)]) == 0
+    out = capsys.readouterr().out
+    assert 'note: "x\\u009by\\u202ez"' in out            # strings: always escaped, losslessly
+    if tty:
+        assert not RAW_UNSAFE.search(out)                # doc comment neutralised on a terminal
+    else:
+        first, second = HOSTILE.split("\u2028")          # line breaks split doc comments
+        assert f"/// doc {first}\n///{second}\n" in out   # redirected: otherwise exact
+        again = flatview.parse_fbs(out)
+        assert again["T"].documentation == [f" doc {HOSTILE.split(chr(0x2028))[0]}",
+                                           HOSTILE.split(chr(0x2028))[1]]

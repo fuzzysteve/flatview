@@ -1109,6 +1109,10 @@ def _quote_attr(v: str) -> str:
     return _quote(v)
 
 
+_INVISIBLE_CONTROLS = frozenset("\u061c\u200e\u200f\u2028\u2029\u202a\u202b\u202c\u202d\u202e"
+                                "\u2066\u2067\u2068\u2069")
+
+
 def _quote(v: str) -> str:
     """A schema string literal that decodes back to exactly ``v``."""
     out = []
@@ -1123,6 +1127,10 @@ def _quote(v: str) -> str:
             out.append("\\t")
         elif ord(ch) < 0x20 or ord(ch) == 0x7F:
             out.append(f"\\x{ord(ch):02x}")
+        elif 0x80 <= ord(ch) <= 0x9F or ch in _INVISIBLE_CONTROLS:
+            # C1 controls and bidi/separator characters: escaped so rendered
+            # text can't drive a terminal or hide what it says
+            out.append(f"\\u{ord(ch):04x}")
         else:
             out.append(ch)
     return '"' + "".join(out) + '"'

@@ -14,12 +14,32 @@ import argparse
 import base64
 import json
 import math
+import re
 import sys
 import time
 from typing import Any
 
 from . import Schema, TableVector, Vector, VerificationError, load_schema, open as fv_open
 from ._reader import TableView
+
+
+#: Characters that can act on a terminal or disguise text when printed raw:
+#: C0 controls (except tab/newline), DEL, the C1 controls (U+009B is a
+#: one-character CSI), bidi overrides/isolates ("Trojan Source") and the
+#: Unicode line/paragraph separators.
+_TERMINAL_UNSAFE = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200e\u200f"
+                              "\u2028\u2029\u202a-\u202e\u2066-\u2069]")
+
+
+def _escape_unsafe(text: str) -> str:
+    """Replace terminal-unsafe characters with ``\\uXXXX``. Inside JSON strings
+    that is the standard escape, so JSON output stays exact."""
+    return _TERMINAL_UNSAFE.sub(lambda m: "\\u%04x" % ord(m.group()), text)
+
+
+def _show(text: str) -> str:
+    """Human-readable output: always neutralised."""
+    return _escape_unsafe(str(text))
 
 
 def _json_default(o: Any):
@@ -39,7 +59,9 @@ def _clean(v: Any) -> Any:
 
 
 def _dumps(v: Any, indent: int | None) -> str:
-    return json.dumps(_clean(v), ensure_ascii=False, indent=indent, default=_json_default)
+    # json.dumps already escapes C0 controls; this escapes the rest (C1, DEL,
+    # bidi, U+2028/9) the same lossless way, so data can't drive the terminal.
+    return _escape_unsafe(json.dumps(_clean(v), ensure_ascii=False, indent=indent, default=_json_default))
 
 
 def _pick(root: TableView, path: str | None) -> Any:
@@ -66,11 +88,11 @@ def _main_vector(root: TableView) -> TableVector | None:
 def cmd_info(args) -> int:
     fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed)
     s = fb.schema
-    print(f"file:    {args.file} ({len(fb.data):,} bytes uncompressed)")
-    print(f"schema:  {s.source}")
+    print(_show(f"file:    {args.file} ({len(fb.data):,} bytes uncompressed)"))
+    print(_show(f"schema:  {s.source}"))
     print(f"root:    {s.root.name if s.root else '?'}")
     if s.file_ident:
-        print(f"ident:   {s.file_ident}")
+        print(_show(f"ident:   {s.file_ident}"))
     for f in fb.root._object.fields:
         v = fb.root[f.name]
         extra = f"  ({len(v):,} items)" if isinstance(v, Vector) else ""
@@ -142,14 +164,20 @@ def cmd_verify(args) -> int:
     try:
         fb.verify(strict_enums=args.strict_enums, check_sorted=not args.no_sorted)
     except VerificationError as e:
-        print(f"INVALID: {e}")
+        print(_show(f"INVALID: {e}"))
         return 1
     print(f"OK ({len(fb.data):,} bytes, {time.perf_counter() - t:.2f}s)")
     return 0
 
 
 def cmd_schema(args) -> int:
-    print(load_schema(args.file).to_fbs(), end="")
+    text = load_schema(args.file).to_fbs()
+    # Strings in the rendered schema are already escaped losslessly; doc
+    # comments can't hold escapes, so neutralise them only for a terminal and
+    # keep redirected output exact.
+    if sys.stdout.isatty():
+        text = _escape_unsafe(text)
+    print(text, end="")
     return 0
 
 
