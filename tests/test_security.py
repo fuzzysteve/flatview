@@ -690,3 +690,89 @@ def test_include_not_utf8(secret_tree):
     (schemas / "bin.fbs").write_bytes(b"\xff\xfe\x00 table")
     with pytest.raises(SchemaError, match="not UTF-8"):
         flatview.load_schema(_main(schemas, "bin.fbs"))
+
+
+# ---------------------------------------------------------------------------
+# include confinement across platforms: lexical gate + identity containment
+
+import ntpath
+import posixpath
+
+from flatview._fbs import _fold, _lexically_inside
+
+
+@pytest.mark.parametrize("cand, inside", [
+    ("C:\\Schemas\\x.fbs", True),
+    ("c:\\SCHEMAS\\sub\\x.fbs", True),                 # case-insensitive, as NTFS is
+    ("C:/Schemas/x.fbs", True),                        # forward slashes
+    ("C:\\Schemas\\..\\secret.txt", False),
+    ("C:\\Schemas2\\x.fbs", False),                    # prefix lookalike
+    ("D:\\Schemas\\x.fbs", False),                     # another drive
+    ("D:x.fbs", False),                                # drive-relative
+    ("\\\\attacker\\share\\x.fbs", False),             # UNC: would leak NTLM credentials
+    ("//attacker/share/x.fbs", False),
+    ("\\\\?\\C:\\Windows\\win.ini", False),            # device namespace
+    ("\\\\.\\pipe\\x", False),
+])
+def test_lexical_gate_windows_rules(cand, inside):
+    roots = [_fold("C:\\Schemas", ntpath)]
+    assert _lexically_inside(cand, roots, ntpath) is inside
+
+
+@pytest.mark.parametrize("cand, inside", [
+    ("/srv/schemas/x.fbs", True),
+    ("/SRV/Schemas/x.fbs", True),                      # case-insensitive (macOS default)
+    ("/srv/schemas/../secret", False),
+    ("/srv/schemas2/x.fbs", False),
+    ("/net/attacker/x.fbs", False),                    # automount
+    ("relative/x.fbs", False),
+])
+def test_lexical_gate_posix_rules(cand, inside):
+    assert _lexically_inside(cand, [_fold("/srv/schemas", posixpath)], posixpath) is inside
+
+
+# (On Windows the same holds for "\\\\attacker\\share": see the ntpath gate test.
+# On POSIX a backslash is an ordinary filename character, so that string is a
+# local name there.)
+@pytest.mark.parametrize("inc", ["//attacker/share/x.fbs", "/net/attacker/x.fbs"])
+def test_outside_include_never_touches_the_file_system(secret_tree, monkeypatch, inc):
+    _, schemas = secret_tree
+    main_path = _main(schemas, inc)
+    seen = []
+    for name, mod in (("realpath", os.path), ("isfile", os.path), ("stat", os), ("open", os)):
+        orig = getattr(mod, name)
+        def spy(p, *a, _orig=orig, **kw):
+            seen.append(os.fspath(p) if isinstance(p, (str, os.PathLike)) else p)
+            return _orig(p, *a, **kw)
+        monkeypatch.setattr(mod, name, spy)
+    with pytest.raises(SchemaError, match="refusing to include"):
+        flatview.load_schema(main_path)
+    assert not [p for p in seen if isinstance(p, str) and "attacker" in p]
+
+
+def test_root_spelled_differently_from_opened_path(secret_tree, monkeypatch):
+    # Models macOS: include_paths given in one spelling ("~/Schemas") while the
+    # opened file's path comes back in another ("~/schemas"). Two symlink
+    # aliases of one directory play the two spellings.
+    tmp, schemas = secret_tree
+    lib = tmp / "lib"
+    lib.mkdir()
+    (lib / "lib.fbs").write_text("table Lib { v: int; }\n")
+    os.symlink(lib, tmp / "LibAlias")
+    os.symlink(lib, tmp / "libalias")
+    monkeypatch.setattr(_fbs_mod, "_fd_path", lambda fd: str(tmp / "libalias" / "lib.fbs"))
+    s = flatview.load_schema(_main(schemas, "lib.fbs"), include_paths=[tmp / "LibAlias"])
+    assert "Lib" in s.objects
+
+
+def test_main_schema_opened_through_symlinked_directory(secret_tree):
+    tmp, schemas = secret_tree
+    os.symlink(schemas, tmp / "via-link")
+    _main(schemas, "common.fbs")
+    assert "Common" in flatview.load_schema(tmp / "via-link" / "main.fbs").objects
+
+
+def test_include_with_nul_byte(secret_tree):
+    _, schemas = secret_tree
+    with pytest.raises(SchemaError, match="NUL"):
+        flatview.load_schema(_main(schemas, "common.fbs\\u0000"))

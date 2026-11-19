@@ -277,7 +277,11 @@ it's up to you:
   schema's own directory or the `include_paths` you pass. Paths are checked
   after resolving symlinks and `..`, and there is no current-directory
   fallback. The opened file itself is re-checked, so swapping in a symlink
-  or FIFO between the check and the open doesn't work either. Unlike flatc, an untrusted schema can't read `/etc/...` or
+  or FIFO between the check and the open doesn't work either. An include
+  written outside the allowed directories (an absolute path, a Windows UNC
+  share like `\\host\share`, another drive) is refused before anything
+  touches the disk or network. Containment is checked by file identity,
+  so case-insensitive file systems and other spellings of a directory work. Unlike flatc, an untrusted schema can't read `/etc/...` or
   `../secret`. Schema text with no file (`parse_fbs(text)`) can only
   include from `include_paths`. Pass `allow_includes=False` to reject
   includes outright.

@@ -77,6 +77,10 @@ library itself has no runtime dependencies; keep it that way.
   path outside the roots. Includes are read only via `_read_confined()`: it opens
   non-blocking, requires a regular file, then re-checks what was actually opened (the
   fd's own path, or a device/inode match), so a swap between check and open is caught.
+  An include path must first pass the lexical gate (`_lexically_inside`: written inside a
+  root, case-insensitive, platform path rules) before any file-system call, so UNC shares
+  and automount paths are never touched. Containment is by identity (`_Roots.contains`:
+  device/inode of the path or a parent), never by comparing path strings.
 - `render()` must validate every name as an identifier and emit strings only via
   `_quote()`. Doc comments are split per line, because rendered text gets parsed again.
 - Never auto-detect size prefixes. A valid buffer's root offset can equal `len - 4`

@@ -143,7 +143,7 @@ class _Ctx:
     include_paths: list[str] = dc_field(default_factory=list)
     #: Real paths includes may resolve into: the main schema's directory and
     #: include_paths. Nothing outside them is ever opened.
-    include_roots: list[str] = dc_field(default_factory=list)
+    include_roots: "_Roots | None" = None
     allow_includes: bool = True
 
 
@@ -276,18 +276,28 @@ class _Parser:
         ctx = self.ctx
         if not ctx.allow_includes:
             raise self.err("includes are disabled (allow_includes=False)", tok)
-        if not ctx.include_roots:
+        roots = ctx.include_roots
+        if not roots:
             raise self.err(f"cannot include {path!r}: schema text has no directory; "
                            "pass include_paths to allow includes", tok)
-        here = os.path.dirname(self.file) if os.path.isfile(self.file) else None
+        if "\0" in path:
+            raise self.err("include path contains a NUL byte", tok)
+        here = os.path.dirname(os.path.realpath(self.file)) if os.path.isfile(self.file) else None
         bases = ([here] if here else []) + ctx.include_paths
         outside = None
         for base in bases:
-            cand = os.path.join(base, path)
+            cand = os.path.join(os.path.abspath(base), path)
+            # Lexical gate first: a path written outside every root (an
+            # absolute path, a Windows UNC share, another drive...) is refused
+            # without touching the file system, so it can't trigger network
+            # access such as an SMB connection or an automount.
+            if not roots.lexically_inside(cand):
+                outside = path
+                continue
             real = os.path.realpath(cand)
             if not os.path.isfile(real):
                 continue
-            if not any(_within(real, root) for root in ctx.include_roots):
+            if not roots.contains(real):
                 outside = path
                 continue
             break
@@ -300,7 +310,7 @@ class _Parser:
             return
         ctx.seen_files.add(real)
         try:
-            data = _read_confined(real, ctx.include_roots)
+            data = _read_confined(real, roots)
         except _Unsafe as e:
             raise self.err(f"refusing to include {path!r}: {e}", tok) from None
         except OSError as e:
@@ -957,11 +967,68 @@ _Resolver.check_nested = _check_nested
 # --------------------------------------------------------------------------
 # Public API
 
-def _within(path: str, root: str) -> bool:
-    try:
-        return os.path.commonpath([path, root]) == root
-    except ValueError:      # different drives on Windows
+def _fold(path: str, pathmod=os.path) -> str:
+    """A spelling for case-insensitive comparison (normcase also turns '/'
+    into '\\' on Windows)."""
+    return pathmod.normcase(pathmod.normpath(path)).casefold()
+
+
+def _lexically_inside(cand: str, folded_roots: list[str], pathmod=os.path) -> bool:
+    """Is ``cand`` written inside one of the roots? Pure string logic (no
+    file-system access), compared case-insensitively. Used only as a gate
+    before touching the disk; real containment is decided by identity."""
+    if not pathmod.isabs(cand):          # e.g. Windows drive-relative "D:x"
         return False
+    c = _fold(cand, pathmod)
+    for r in folded_roots:
+        try:
+            if pathmod.commonpath([c, r]) == r:
+                return True
+        except ValueError:               # different drives / UNC vs local
+            continue
+    return False
+
+
+class _Roots:
+    """The directories includes may read from.
+
+    Containment is decided by file identity (device and inode of the path or
+    one of its parents), so different spellings of the same directory agree:
+    case on case-insensitive file systems (macOS, Windows), /var vs
+    /private/var, 8.3 names and other aliases.
+    """
+
+    def __init__(self, paths: list[str]):
+        self.folded: list[str] = []
+        self.ids: set[tuple[int, int]] = set()
+        for p in paths:
+            for form in {os.path.abspath(p), os.path.realpath(p)}:
+                self.folded.append(_fold(form))
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            self.ids.add((st.st_dev, st.st_ino))
+
+    def __bool__(self) -> bool:
+        return bool(self.ids)
+
+    def lexically_inside(self, cand: str) -> bool:
+        return _lexically_inside(cand, self.folded)
+
+    def contains(self, path: str) -> bool:
+        p = path
+        while True:
+            try:
+                st = os.stat(p)
+            except OSError:
+                return False
+            if (st.st_dev, st.st_ino) in self.ids:
+                return True
+            parent = os.path.dirname(p)
+            if parent == p:
+                return False
+            p = parent
 
 
 _MAX_SCHEMA_BYTES = 64 << 20
@@ -986,7 +1053,7 @@ def _fd_path(fd: int) -> str | None:
     return None
 
 
-def _read_confined(real: str, roots: list[str]) -> bytes:
+def _read_confined(real: str, roots: "_Roots") -> bytes:
     """Read an include whose path was checked to lie inside ``roots``.
 
     The check and the open are separate steps, so a path component could be
@@ -1005,7 +1072,7 @@ def _read_confined(real: str, roots: list[str]) -> bytes:
             raise _Unsafe("not a regular file")
         actual = _fd_path(fd)
         if actual is not None:
-            if not any(_within(actual, root) for root in roots):
+            if not roots.contains(actual):
                 raise _Unsafe("it resolved outside the schema directory and include_paths")
         else:
             try:
@@ -1040,11 +1107,11 @@ def parse_fbs(text: str, filename: str = "<string>", include_paths: list[str] | 
     every include, for schemas from untrusted sources.
     """
     ctx = _Ctx(include_paths=[os.fspath(p) for p in (include_paths or [])], allow_includes=allow_includes)
-    roots = [os.path.realpath(p) for p in ctx.include_paths]
+    root_dirs = list(ctx.include_paths)
     if os.path.isfile(filename):
         ctx.seen_files.add(os.path.realpath(filename))
-        roots.insert(0, os.path.dirname(os.path.realpath(filename)))
-    ctx.include_roots = roots
+        root_dirs.insert(0, os.path.dirname(os.path.realpath(filename)))
+    ctx.include_roots = _Roots(root_dirs)
     _Parser(text, filename, ctx, is_main=True).parse()
     schema = _Resolver(ctx).run()
     schema.source = filename
