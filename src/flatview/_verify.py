@@ -28,7 +28,7 @@ class VerificationError(ValueError):
 
 
 class _Verifier:
-    def __init__(self, schema: Schema, buf: memoryview, *, max_depth: int, max_tables: int,
+    def __init__(self, schema: Schema, buf: memoryview, *, max_depth: int, max_refs: int,
                  check_alignment: bool, check_sorted: bool, check_utf8: bool, strict_enums: bool,
                  base: int = 0, strict_table_size: bool = False):
         self.schema = schema
@@ -46,8 +46,11 @@ class _Verifier:
         self.buf = buf
         self.n = len(buf)
         self.max_depth = max_depth
-        self.max_tables = max_tables
-        self.tables = 0
+        # Budget of offsets followed. Shared sub-objects let a small buffer
+        # reference the same data millions of times ("reference
+        # amplification"); every followed offset costs one unit.
+        self.max_refs = max_refs
+        self.refs = 0
         self.align = check_alignment
         self.sorted = check_sorted
         self.utf8 = check_utf8
@@ -63,6 +66,11 @@ class _Verifier:
             self.fail(path, f"{what} at {pos} is not {align}-byte aligned")
 
     def deref(self, pos: int, path: str, what: str) -> int:
+        self.refs += 1
+        if self.refs > self.max_refs:
+            self.fail(path, f"followed more than {self.max_refs:,} offsets: the buffer shares "
+                      "sub-objects heavily (possible reference amplification); raise max_refs "
+                      "if this data is trusted")
         self.check(pos, 4, 4, path, f"offset to {what}")
         off = _u32(self.buf, pos)[0]
         if off == 0:
@@ -110,9 +118,6 @@ class _Verifier:
     def table(self, obj: Object, pos: int, path: str, depth: int) -> None:
         if depth > self.max_depth:
             self.fail(path, f"nesting deeper than {self.max_depth}")
-        self.tables += 1
-        if self.tables > self.max_tables:
-            self.fail(path, f"more than {self.max_tables} tables")
         self.check(pos, 4, 4, path, f"table {obj.short_name}")
         vt = pos - _i32(self.buf, pos)[0]
         self.check(vt, 4, 2, path, "vtable")
@@ -210,12 +215,12 @@ class _Verifier:
                 from ._reader import _resolve_in
                 target = _resolve_in(self.schema, nested, obj.namespace)
                 sub = _Verifier(self.schema, self.buf[start:start + n], max_depth=self.max_depth - depth,
-                                max_tables=self.max_tables - self.tables, check_alignment=self.align,
+                                max_refs=self.max_refs - self.refs, check_alignment=self.align,
                                 check_sorted=self.sorted, check_utf8=self.utf8,
                                 strict_enums=self.strict_enums, base=self.base + start,
                                 strict_table_size=self.strict_size)
                 sub.root(target, fpath)
-                self.tables += sub.tables
+                self.refs += sub.refs
             return
         if el == BaseType.OBJ and t.ref.is_struct:
             self.check(start, n * t.ref.bytesize, t.ref.minalign, fpath, "vector data")
@@ -280,10 +285,17 @@ def _show(k: Any) -> str:
 
 def verify(schema: Schema, data: Any, root: str | Object | None = None, *,
            size_prefixed: bool | None = None, check_identifier: bool = True,
-           max_depth: int = 64, max_tables: int = 100_000_000, check_alignment: bool = True,
+           max_depth: int = 64, max_refs: int | None = None, check_alignment: bool = True,
            check_sorted: bool = True, check_utf8: bool = True, strict_enums: bool = False,
            strict_table_size: bool = False) -> None:
-    """Verify a whole buffer against the schema. Raises VerificationError."""
+    """Verify a whole buffer against the schema. Raises VerificationError.
+
+    max_refs bounds the number of offsets followed. The default, buffer size
+    / 4, is the most any buffer without shared sub-objects can contain, so
+    reference-amplification buffers (a few KB that reference one sub-table
+    millions of times) are rejected quickly. Raise it for trusted data that
+    deliberately shares tables.
+    """
     buf = _as_buffer(data)
     obj = schema.object(root)
     if size_prefixed is None:
@@ -300,6 +312,10 @@ def verify(schema: Schema, data: Any, root: str | Object | None = None, *,
     if check_identifier and schema.file_ident and root is None:
         if bytes(buf[4:8]) != schema.file_ident.encode():
             raise VerificationError("", f"file identifier {bytes(buf[4:8])!r} != {schema.file_ident!r}")
-    _Verifier(schema, buf, max_depth=max_depth, max_tables=max_tables, check_alignment=check_alignment,
+    if max_refs is None:
+        # Each offset occupies 4 bytes, so a buffer without shared
+        # sub-objects can never need more than this.
+        max_refs = len(buf) // 4 + 1
+    _Verifier(schema, buf, max_depth=max_depth, max_refs=max_refs, check_alignment=check_alignment,
               check_sorted=check_sorted, check_utf8=check_utf8, strict_enums=strict_enums,
               base=base, strict_table_size=strict_table_size).root(obj)

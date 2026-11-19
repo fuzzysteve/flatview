@@ -211,13 +211,14 @@ Unions return the member table view (and `field_type` gives the enum member).
 
 ```python
 schema.verify(data, strict_enums=False, check_sorted=True, check_alignment=True,
-              check_utf8=True, max_depth=64, strict_table_size=False)
+              check_utf8=True, max_depth=64, max_refs=None, strict_table_size=False)
 # raises VerificationError('products[17].name: string is not valid UTF-8 ...')
 ```
 
 `check_sorted` matters: FlatBuffers lookups assume keyed vectors are sorted,
-so an unsorted vector makes `lookup()` silently wrong. Plain reads are
-memory-safe without verification (it's Python), but verify untrusted input.
+so an unsorted vector makes `lookup()` silently wrong. `max_refs` bounds how
+many offsets are followed (default: buffer size / 4, the most a buffer
+without shared sub-objects can contain). See [Security](#security).
 
 ### Writing
 
@@ -244,6 +245,34 @@ flatview dump   catalog.shop --jsonl --limit 5 -s shop.fbs
 flatview verify catalog.shop --strict-enums -s shop.fbs
 flatview schema shop.bfbs                     # print a binary schema as .fbs
 ```
+
+## Security
+
+flatview is written to handle untrusted input. What that covers, and what
+it's up to you:
+
+* **Untrusted buffers: verify them first.** `verify()` (or `open(...,
+  verify=True)`) checks every offset, length, alignment, string and union
+  before you read. Reads without verification are still memory-safe (it's
+  Python: every read is bounds-checked), but malformed data can raise
+  ordinary exceptions such as `struct.error`, and a hostile buffer can make
+  `_asdict()` build enormous output.
+* **Reference amplification.** A buffer can point at the same sub-table
+  many times, so a few KB can describe millions of tables. The verifier
+  rejects buffers that follow more offsets than `max_refs`. Raise it for
+  trusted data that deliberately shares tables.
+* **Compressed files.** Decompression stops at `max_size` (default 2 GiB,
+  the largest possible FlatBuffer) with `DecompressionLimitError`.
+* **Untrusted `.bfbs` schemas.** These are verified against `reflection.fbs`,
+  every name must be a valid identifier, and struct and table layouts are
+  checked before use. Generated converter code never contains schema text.
+* **Untrusted `.fbs` schemas.** Like flatc, an `include` can read any file
+  the process can, so don't parse untrusted `.fbs` text that may use
+  includes.
+* **Memory-mapped files.** If another process truncates a file in place
+  while it's open, Python crashes with SIGBUS (true of any mmap). Replacing
+  files by atomic rename is safe. `open(..., use_mmap=False)` avoids mmap
+  entirely.
 
 ## Worked example: the EVE Online SDE
 

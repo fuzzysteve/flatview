@@ -496,13 +496,21 @@ def _build_table_class(schema: Schema, obj: Object) -> type:
         g = _table_getter(schema, obj, f)
         getters[f.name] = g
         slots[f.name] = f.offset
-        if not hasattr(TableView, f.name):
+        if _attribute_ok(f.name, TableView):
             setattr(cls, f.name, property(g, doc=_field_doc(f)))
     cls._getters = getters
     cls._slots = slots
     cls._fields = tuple(f.name for f in obj.fields)
     cls._key_reader = _key_reader(obj) if obj.key_field else None
     return cls
+
+
+def _attribute_ok(name: str, base: type) -> bool:
+    """Whether a field may become a view attribute. Never shadow helpers, and
+    never take double-underscore names: as class attributes they would replace
+    Python protocol methods (``__len__``, ``__iter__``...). Such fields stay
+    reachable as ``view["name"]``."""
+    return not name.startswith("__") and not hasattr(base, name)
 
 
 def _field_doc(f: Field) -> str:
@@ -729,7 +737,7 @@ def _build_struct_class(schema: Schema, obj: Object) -> type:
     for f in obj.fields:
         g = _struct_getter(schema, f)
         getters[f.name] = g
-        if not hasattr(StructView, f.name):
+        if _attribute_ok(f.name, StructView):
             setattr(cls, f.name, property(g, doc=_field_doc(f)))
     cls._getters = getters
     cls._fields = tuple(f.name for f in obj.fields)

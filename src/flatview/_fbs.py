@@ -180,7 +180,13 @@ class _Parser:
         if t.kind != "string":
             raise self.err(f"expected string literal, got {t.text!r}")
         self.i += 1
-        return _unquote(t.text)
+        return self.unquote(t)
+
+    def unquote(self, t: _Tok) -> str:
+        try:
+            return _unquote(t.text)
+        except ValueError as e:
+            raise self.err(f"bad string literal: {e}", t) from None
 
     def qualify(self, name: str) -> str:
         return f"{self.ns}.{name}" if self.ns else name
@@ -262,7 +268,7 @@ class _Parser:
             if self.accept(":"):
                 t = self.next()
                 if t.kind == "string":
-                    val = _unquote(t.text)
+                    val = self.unquote(t)
                 elif t.kind in ("number", "ident"):
                     val = t.text
                 else:
@@ -273,9 +279,11 @@ class _Parser:
                 break
         return attrs
 
-    def parse_type(self) -> tuple:
+    def parse_type(self, nested: bool = False) -> tuple:
         if self.accept("["):
-            inner = self.parse_type()
+            if nested:
+                raise self.err("nested vectors/arrays are not allowed")
+            inner = self.parse_type(nested=True)
             if self.accept(":"):
                 t = self.next()
                 if t.kind != "number":
@@ -360,11 +368,48 @@ class _Parser:
                 depth -= 1
 
 
+_SIMPLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", "0": "\0",
+                   '"': '"', "'": "'", "\\": "\\", "/": "/"}
+
+
 def _unquote(s: str) -> str:
+    """Decode a schema string literal. Raises ValueError on a bad escape."""
     body = s[1:-1]
     if "\\" not in body:
         return body
-    return body.encode("utf-8").decode("unicode_escape").encode("latin-1").decode("utf-8")
+    out: list[str] = []
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+        if i + 1 >= len(body):
+            raise ValueError("string ends with a backslash")
+        esc = body[i + 1]
+        if esc in _SIMPLE_ESCAPES:
+            out.append(_SIMPLE_ESCAPES[esc])
+            i += 2
+        elif esc in "xu":
+            width = 2 if esc == "x" else 4
+            digits = body[i + 2:i + 2 + width]
+            if len(digits) != width or any(c not in "0123456789abcdefABCDEF" for c in digits):
+                raise ValueError(f"bad \\{esc} escape")
+            code = int(digits, 16)
+            i += 2 + width
+            if esc == "u" and 0xD800 <= code <= 0xDBFF and body[i:i + 2] == "\\u":
+                low = body[i + 2:i + 6]
+                if len(low) == 4 and all(c in "0123456789abcdefABCDEF" for c in low) and \
+                        0xDC00 <= int(low, 16) <= 0xDFFF:
+                    code = 0x10000 + ((code - 0xD800) << 10) + (int(low, 16) - 0xDC00)
+                    i += 6
+            if 0xD800 <= code <= 0xDFFF:
+                raise ValueError("unpaired surrogate in \\u escape")
+            out.append(chr(code))
+        else:
+            raise ValueError(f"unknown escape \\{esc}")
+    return "".join(out)
 
 
 # --------------------------------------------------------------------------

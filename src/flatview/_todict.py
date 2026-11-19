@@ -119,7 +119,9 @@ class _Gen:
     def fn(self, obj: Object) -> str:
         name = self.names.get(obj.name)
         if name is None:
-            name = f"c{len(self.names)}_{obj.short_name}"
+            # Index only: schema names (arbitrary strings in a .bfbs) must
+            # never be interpolated into generated source.
+            name = f"c{len(self.names)}"
             self.names[obj.name] = name
             (self.gen_struct if obj.is_struct else self.gen_table)(obj, name)
         return name

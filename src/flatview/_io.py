@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import builtins
-import gzip
 import mmap
 import os
+import zlib
 from typing import Any
 
 from ._bfbs import load_bfbs
@@ -16,37 +16,86 @@ from ._schema import Schema, SchemaError
 _GZIP_MAGIC = b"\x1f\x8b"
 _ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
 
+#: Default cap on decompressed size. A FlatBuffer cannot exceed 2 GiB (its
+#: offsets are 32-bit and signed where relative), so anything larger is
+#: either not a FlatBuffer or a decompression bomb.
+MAX_DECOMPRESSED = 1 << 31
+
 PathLike = str | os.PathLike
 
 
-def _decompress(data: bytes, path: str) -> bytes:
-    if data[:2] == _GZIP_MAGIC:
-        return gzip.decompress(data)
-    if data[:4] == _ZSTD_MAGIC:
+class DecompressionLimitError(ValueError):
+    """Compressed input expands beyond the allowed size."""
+
+
+def _too_big(path: str, limit: int) -> DecompressionLimitError:
+    return DecompressionLimitError(f"{path}: decompressed data exceeds {limit:,} bytes "
+                                   "(pass max_size= to allow more)")
+
+
+def _gunzip(data: bytes, path: str, limit: int) -> bytes:
+    out = bytearray()
+    while data:
+        d = zlib.decompressobj(wbits=31)        # one gzip member
+        chunk = d.decompress(data, limit + 1 - len(out))
+        out += chunk
+        if len(out) > limit or d.unconsumed_tail:
+            raise _too_big(path, limit)
+        if not d.eof:
+            raise OSError(f"{path}: truncated gzip data")
+        data = d.unused_data                     # next member, if any
+        if data and data[:2] != _GZIP_MAGIC:
+            break                                # trailing garbage: ignore, as gzip(1) does
+    return bytes(out)
+
+
+def _unzstd(data: bytes, path: str, limit: int) -> bytes:
+    try:
+        from compression import zstd  # Python 3.14+
+    except ImportError:
         try:
-            from compression import zstd  # Python 3.14+
+            import zstandard  # type: ignore
         except ImportError:
-            try:
-                import zstandard  # type: ignore
-            except ImportError:
-                raise OSError(f"{path} is zstd-compressed; install 'zstandard' or use Python 3.14+") from None
-            return zstandard.ZstdDecompressor().decompress(data, max_output_size=1 << 34)
-        return zstd.decompress(data)
+            raise OSError(f"{path} is zstd-compressed; install 'zstandard' or use Python 3.14+") from None
+        with zstandard.ZstdDecompressor().stream_reader(data, read_across_frames=True) as r:
+            out = r.read(limit + 1)
+        if len(out) > limit:
+            raise _too_big(path, limit)
+        return out
+    out = bytearray()
+    while data:
+        d = zstd.ZstdDecompressor()              # one frame
+        out += d.decompress(data, max_length=limit + 1 - len(out))
+        if len(out) > limit:
+            raise _too_big(path, limit)
+        if not d.eof:
+            raise OSError(f"{path}: truncated zstd data")
+        data = d.unused_data
+    return bytes(out)
+
+
+def _decompress(data: bytes, path: str, limit: int = MAX_DECOMPRESSED) -> bytes:
+    if data[:2] == _GZIP_MAGIC:
+        return _gunzip(data, path, limit)
+    if data[:4] == _ZSTD_MAGIC:
+        return _unzstd(data, path, limit)
     return data
 
 
-def read_bytes(path: PathLike) -> bytes:
+def read_bytes(path: PathLike, max_size: int = MAX_DECOMPRESSED) -> bytes:
     """Read a file, transparently decompressing gzip (or zstd) content.
 
     Compression is detected by magic number, not extension: the SDE serves
     its .fb/.fbs/.bfbs files as raw gzip bodies under their plain names.
+    Decompression stops with DecompressionLimitError beyond ``max_size``.
     """
     with builtins.open(path, "rb") as fh:
         data = fh.read()
-    return _decompress(data, os.fspath(path))
+    return _decompress(data, os.fspath(path), max_size)
 
 
-def load_schema(source: PathLike | bytes | Schema, include_paths: list[str] | None = None) -> Schema:
+def load_schema(source: PathLike | bytes | Schema, include_paths: list[str] | None = None,
+                max_size: int = MAX_DECOMPRESSED) -> Schema:
     """Load a schema from a .fbs or .bfbs file (or raw bytes); gzip is fine.
 
     The format is detected from content (``BFBS`` identifier), not extension.
@@ -54,10 +103,10 @@ def load_schema(source: PathLike | bytes | Schema, include_paths: list[str] | No
     if isinstance(source, Schema):
         return source
     if isinstance(source, (bytes, bytearray, memoryview)):
-        data, name = _decompress(bytes(source), "<bytes>"), "<bytes>"
+        data, name = _decompress(bytes(source), "<bytes>", max_size), "<bytes>"
     else:
         name = os.fspath(source)
-        data = read_bytes(name)
+        data = read_bytes(name, max_size)
     if len(data) >= 8 and data[4:8] == b"BFBS":
         return load_bfbs(data, source=name)
     try:
@@ -95,7 +144,8 @@ class FlatFile:
 
     def __init__(self, path: PathLike, schema: PathLike | Schema | None = None, *,
                  root: str | None = None, verify: bool = False, use_mmap: bool = True,
-                 size_prefixed: bool | None = None, check_identifier: bool = True):
+                 size_prefixed: bool | None = None, check_identifier: bool = True,
+                 max_size: int = MAX_DECOMPRESSED):
         self.path = os.fspath(path)
         if schema is None:
             found = find_schema(self.path)
@@ -117,7 +167,7 @@ class FlatFile:
             data = self._mmap
         else:
             fh.seek(0)
-            data = _decompress(fh.read(), self.path)
+            data = _decompress(fh.read(), self.path, max_size)
             fh.close()
         self.data = memoryview(data)
         self.root: TableView = read(self.schema, self.data, root, verify=verify,

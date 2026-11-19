@@ -58,7 +58,20 @@ library itself has no runtime dependencies; keep it that way.
   `strict_table_size=True` is the stricter flatcc-style check. Alignment is relative to
   the start of the whole buffer, so size-prefixed and nested buffers carry a `base`.
 - View helper methods are `_`-prefixed (namedtuple style) so they never shadow schema
-  fields.
+  fields. Fields named `__x...` never become attributes (they would replace Python
+  protocol methods); they are reachable as `view["__x"]`.
+
+## Security rules (tests in `tests/test_security.py`)
+
+- Treat `.bfbs` files and buffers as untrusted. **Never interpolate schema-derived
+  text into generated source** in `_todict.py`. Use indexes, `repr()`, or `self.const()`
+  values only; integers come from struct unpacking.
+- `load_bfbs` must keep verifying the buffer against `reflection.fbs`, rejecting
+  non-identifier names, and running `validate()` (layout sanity) before returning.
+- Every new kind of offset the verifier follows must go through `deref()`, so it counts
+  against `max_refs` (amplification protection).
+- All decompression goes through `_io._decompress` with a size cap (`max_size`, default
+  2 GiB).
 
 ## Testing conventions
 

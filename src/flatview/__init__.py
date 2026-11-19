@@ -19,7 +19,7 @@ from ._reader import (
 )
 from ._verify import VerificationError, verify
 from ._builder import EncodeError, encode
-from ._io import FlatFile, load_schema, open, read_bytes
+from ._io import DecompressionLimitError, FlatFile, load_schema, open, read_bytes
 
 __all__ = [
     "BaseType", "Enum", "EnumVal", "Field", "Object", "Schema", "SchemaError", "Type",
@@ -27,7 +27,7 @@ __all__ = [
     "FlatBufferError", "TableView", "StructView", "Vector", "ScalarVector", "StringVector",
     "StructVector", "TableVector", "UnionVector", "has_identifier", "read", "to_python",
     "VerificationError", "verify", "EncodeError", "encode",
-    "FlatFile", "open", "read_bytes",
+    "FlatFile", "open", "read_bytes", "DecompressionLimitError",
 ]
 
 __version__ = "0.1.0"

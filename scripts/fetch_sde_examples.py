@@ -10,24 +10,29 @@ them as raw gzip bodies under their plain names; flatview reads either form.
 
 import argparse
 import concurrent.futures
-import gzip
 import json
 import os
+import re
 import sys
+import urllib.parse
 import urllib.request
+
+from flatview._io import _decompress   # gzip with a size cap
 
 INDEX_URL = "https://sde.evetech.net/tranquility/latest/"
 DEFAULT = ["_sde", "categories", "groups", "types", "typeDogma", "typeMaterials", "blueprints",
            "compressibleTypes", "dogmaAttributes", "dogmaEffects", "mapSolarSystems", "marketGroups",
            "planetSchematics", "certificates", "masteries", "skins", "npcCorporations"]
 HEADERS = {"User-Agent": "flatview-sde-examples/0.1"}
+SAFE_NAME = re.compile(r"[A-Za-z0-9_]+")   # table names become file names
+ALLOWED_HOST = "sde.evetech.net"
 OUT = os.path.join(os.path.dirname(__file__), "..", "tests", "data", "sde-full")
 
 
 def fetch(url: str) -> bytes:
     with urllib.request.urlopen(urllib.request.Request(url, headers=HEADERS), timeout=120) as r:
         data = r.read()
-    return gzip.decompress(data) if data[:2] == b"\x1f\x8b" else data
+    return _decompress(data, url)
 
 
 def main() -> int:
@@ -44,14 +49,23 @@ def main() -> int:
     if missing:
         print(f"unknown tables: {missing}", file=sys.stderr)
         return 2
+    for t in wanted:
+        if not SAFE_NAME.fullmatch(t):
+            print(f"refusing unsafe table name from index: {t!r}", file=sys.stderr)
+            return 2
     os.makedirs(args.out, exist_ok=True)
     print(f"release {index['release']} build {index['buildNumber']}: {len(wanted)} tables -> {args.out}")
 
     jobs = []
     for t in wanted:
         fbi = tables[t]["flatbuffers"]
-        jobs += [(fbi["binaryUrl"], f"{t}.fb"), (fbi["schemaUrl"], f"{t}.fbs"),
-                 (fbi["binarySchemaUrl"], f"{t}.bfbs")]
+        for url, name in ((fbi["binaryUrl"], f"{t}.fb"), (fbi["schemaUrl"], f"{t}.fbs"),
+                          (fbi["binarySchemaUrl"], f"{t}.bfbs")):
+            u = urllib.parse.urlsplit(url)
+            if u.scheme != "https" or u.hostname != ALLOWED_HOST:
+                print(f"refusing URL outside https://{ALLOWED_HOST}/: {url!r}", file=sys.stderr)
+                return 2
+            jobs.append((url, name))
 
     def get(job):
         url, name = job
