@@ -126,6 +126,10 @@ class _Ctx:
     attributes: set[str] = dc_field(default_factory=set)
     seen_files: set[str] = dc_field(default_factory=set)
     include_paths: list[str] = dc_field(default_factory=list)
+    #: Real paths includes may resolve into: the main schema's directory and
+    #: include_paths. Nothing outside them is ever opened.
+    include_roots: list[str] = dc_field(default_factory=list)
+    allow_includes: bool = True
 
 
 class _Parser:
@@ -244,19 +248,44 @@ class _Parser:
                 raise self.err(f"unexpected {kw!r}")
 
     def include(self, path: str, tok: _Tok) -> None:
-        here = os.path.dirname(self.file)
-        for base in (here, *self.ctx.include_paths, os.getcwd()):
-            cand = os.path.normpath(os.path.join(base, path))
-            if os.path.isfile(cand):
-                break
+        """Resolve and parse an include, confined to the include roots.
+
+        Candidates are tried relative to the including file, then each
+        include path. A candidate is used only if its real path (symlinks
+        resolved) lies inside the main schema's directory or an include
+        path, so an untrusted schema cannot read arbitrary files.
+        """
+        ctx = self.ctx
+        if not ctx.allow_includes:
+            raise self.err("includes are disabled (allow_includes=False)", tok)
+        if not ctx.include_roots:
+            raise self.err(f"cannot include {path!r}: schema text has no directory; "
+                           "pass include_paths to allow includes", tok)
+        here = os.path.dirname(self.file) if os.path.isfile(self.file) else None
+        bases = ([here] if here else []) + ctx.include_paths
+        outside = None
+        for base in bases:
+            cand = os.path.join(base, path)
+            real = os.path.realpath(cand)
+            if not os.path.isfile(real):
+                continue
+            if not any(_within(real, root) for root in ctx.include_roots):
+                outside = path
+                continue
+            break
         else:
+            if outside is not None:
+                raise self.err(f"refusing to include {path!r}: outside the schema directory "
+                               "and include_paths", tok)
             raise self.err(f"cannot find included file {path!r}", tok)
-        real = os.path.realpath(cand)
-        if real in self.ctx.seen_files:
+        if real in ctx.seen_files:
             return
-        self.ctx.seen_files.add(real)
-        with open(cand, encoding="utf-8") as fh:
-            _Parser(fh.read(), cand, self.ctx, is_main=False).parse()
+        ctx.seen_files.add(real)
+        with open(real, encoding="utf-8") as fh:
+            text = fh.read(_MAX_SCHEMA_BYTES + 1)
+        if len(text) > _MAX_SCHEMA_BYTES:
+            raise self.err(f"included file {path!r} is larger than {_MAX_SCHEMA_BYTES:,} bytes", tok)
+        _Parser(text, real, ctx, is_main=False).parse()
 
     def parse_attrs(self) -> dict[str, str]:
         attrs: dict[str, str] = {}
@@ -749,11 +778,31 @@ _Resolver.check_nested = _check_nested
 # --------------------------------------------------------------------------
 # Public API
 
-def parse_fbs(text: str, filename: str = "<string>", include_paths: list[str] | None = None) -> Schema:
-    """Parse schema text. ``filename`` is used for includes and messages."""
-    ctx = _Ctx(include_paths=list(include_paths or []))
+def _within(path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:      # different drives on Windows
+        return False
+
+
+_MAX_SCHEMA_BYTES = 64 << 20
+
+
+def parse_fbs(text: str, filename: str = "<string>", include_paths: list[str] | None = None,
+              allow_includes: bool = True) -> Schema:
+    """Parse schema text. ``filename`` is used for includes and messages.
+
+    ``include`` statements may only reach files inside the directory of
+    ``filename`` (when it is a real file) or one of ``include_paths``;
+    symlinks are resolved before checking. ``allow_includes=False`` rejects
+    every include, for schemas from untrusted sources.
+    """
+    ctx = _Ctx(include_paths=[os.fspath(p) for p in (include_paths or [])], allow_includes=allow_includes)
+    roots = [os.path.realpath(p) for p in ctx.include_paths]
     if os.path.isfile(filename):
         ctx.seen_files.add(os.path.realpath(filename))
+        roots.insert(0, os.path.dirname(os.path.realpath(filename)))
+    ctx.include_roots = roots
     _Parser(text, filename, ctx, is_main=True).parse()
     schema = _Resolver(ctx).run()
     schema.source = filename
@@ -788,9 +837,24 @@ def _type_text(t: Type, ns: str) -> str:
     return one(t.base)
 
 
+_RENDER_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_RENDER_QUALIFIED = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*")
+
+
+def _ident(name: str, what: str, qualified: bool = False) -> str:
+    """Refuse to render anything that is not a plain (dotted) identifier:
+    rendered text is parsed again, so other characters could inject schema
+    declarations (an ``include``, say)."""
+    pattern = _RENDER_QUALIFIED if qualified else _RENDER_IDENT
+    if not isinstance(name, str) or not pattern.fullmatch(name):
+        raise SchemaError(f"cannot render {what} {name!r}: not an identifier")
+    return name
+
+
 def _attr_text(attrs: dict[str, str], extra: list[str] = ()) -> str:
     parts = list(extra)
     for k, v in attrs.items():
+        _ident(k, "attribute name")
         if k in ("id", "key", "required", "deprecated"):
             continue
         parts.append(k if v == "0" and k not in ("force_align",) else f"{k}: {_quote_attr(v)}")
@@ -798,17 +862,56 @@ def _attr_text(attrs: dict[str, str], extra: list[str] = ()) -> str:
 
 
 def _quote_attr(v: str) -> str:
-    if re.fullmatch(r"[-+]?\d+", v):
+    if re.fullmatch(r"[-+]?[0-9]+", v):
         return v
-    return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return _quote(v)
+
+
+def _quote(v: str) -> str:
+    """A schema string literal that decodes back to exactly ``v``."""
+    out = []
+    for ch in v:
+        if ch in '"\\':
+            out.append("\\" + ch)
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append(f"\\x{ord(ch):02x}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
 
 
 def _docs(lines: list[str], indent: str) -> str:
-    return "".join(f"{indent}///{d}\n" for d in lines)
+    # A doc string containing a line break must not end its comment early:
+    # the rest would be parsed as declarations.
+    return "".join(f"{indent}///{part}\n" for d in lines for part in (d.splitlines() or [""]))
 
 
 def render(schema: Schema) -> str:
-    """Render a schema as .fbs text (round-trips through :func:`parse_fbs`)."""
+    """Render a schema as .fbs text (round-trips through :func:`parse_fbs`).
+
+    Every name is checked to be an identifier and every string is escaped,
+    so a schema from an untrusted .bfbs cannot inject declarations.
+    """
+    for d in (*schema.objects.values(), *schema.enums.values()):
+        _ident(d.name, "type name", qualified=True)
+        for k in d.attributes:
+            _ident(k, "attribute name")
+    for o in schema.objects.values():
+        for f in o.fields:
+            _ident(f.name, "field name")
+            for k in f.attributes:
+                _ident(k, "attribute name")
+    for e in schema.enums.values():
+        for v in e.values:
+            _ident(v.name, "enum value name")
+            for k in v.attributes:
+                _ident(k, "attribute name")
     out: list[str] = []
     builtin = BUILTIN_ATTRIBUTES
     user_attrs = sorted({k for d in (*schema.objects.values(), *schema.enums.values())
@@ -883,7 +986,7 @@ def render(schema: Schema) -> str:
             out.append(f"namespace {schema.root.namespace};\n\n")
         out.append(f"root_type {schema.root.short_name};\n")
     if schema.file_ident:
-        out.append(f'file_identifier "{schema.file_ident}";\n')
+        out.append(f"file_identifier {_quote(schema.file_ident)};\n")
     if schema.file_ext:
-        out.append(f'file_extension "{schema.file_ext}";\n')
+        out.append(f"file_extension {_quote(schema.file_ext)};\n")
     return "".join(out)

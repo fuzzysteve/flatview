@@ -461,3 +461,140 @@ def test_failed_open_releases_file(tmp_path):
             with pytest.raises(flatview.FlatBufferError, match="identifier"):
                 flatview.open(p, s)
         gc.collect()          # an unclosed file would raise ResourceWarning here
+
+
+# ===========================================================================
+# Fourth pass: reading what you shouldn't
+
+SECRET = "SECRET_TOKEN_hunter2"
+
+
+@pytest.fixture
+def secret_tree(tmp_path):
+    (tmp_path / "secret.txt").write_text(SECRET + "\n")
+    schemas = tmp_path / "schemas"
+    (schemas / "sub").mkdir(parents=True)
+    (schemas / "common.fbs").write_text("table Common { v: int; }\n")
+    (schemas / "sub" / "deep.fbs").write_text("table Deep { v: int; }\n")
+    return tmp_path, schemas
+
+
+def _main(schemas, inc):
+    p = schemas / "main.fbs"
+    p.write_text(f'include "{inc}";\ntable T {{ a: int; }}\nroot_type T;\n')
+    return p
+
+
+@pytest.mark.parametrize("inc", ["../secret.txt", "{abs}", "sub/../../secret.txt", "link.fbs"])
+def test_include_cannot_escape_schema_directory(secret_tree, inc):
+    tmp, schemas = secret_tree
+    (schemas / "link.fbs").symlink_to(tmp / "secret.txt")
+    p = _main(schemas, inc.format(abs=tmp / "secret.txt"))
+    with pytest.raises(SchemaError, match="refusing to include") as e:
+        flatview.load_schema(p)
+    assert SECRET not in str(e.value)
+
+
+def test_include_of_system_file_refused(secret_tree):
+    _, schemas = secret_tree
+    with pytest.raises(SchemaError, match="refusing to include"):
+        flatview.load_schema(_main(schemas, "/etc/hostname"))
+
+
+def test_legitimate_includes_still_work(secret_tree, tmp_path):
+    _, schemas = secret_tree
+    assert "Common" in flatview.load_schema(_main(schemas, "common.fbs")).objects
+    assert "Deep" in flatview.load_schema(_main(schemas, "sub/deep.fbs")).objects
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    (other / "lib.fbs").write_text("table Lib { v: int; }\n")
+    assert "Lib" in flatview.load_schema(_main(schemas, "lib.fbs"), include_paths=[other]).objects
+
+
+def test_include_from_text_needs_include_paths(secret_tree):
+    _, schemas = secret_tree
+    with pytest.raises(SchemaError, match="pass include_paths"):
+        parse_fbs('include "common.fbs"; table T { a: int; }')
+    assert "Common" in parse_fbs('include "common.fbs"; table T { a: int; }', include_paths=[schemas]).objects
+
+
+def test_includes_can_be_disabled(secret_tree):
+    _, schemas = secret_tree
+    with pytest.raises(SchemaError, match="includes are disabled"):
+        flatview.load_schema(_main(schemas, "common.fbs"), allow_includes=False)
+
+
+# --- an untrusted .bfbs must not be able to inject text into to_fbs() -------------
+
+def _render_reparse(d):
+    s = flatview.load_bfbs(REFL.encode(d))
+    text = s.to_fbs()
+    assert all(line.lstrip().startswith("///") for line in text.splitlines() if "include" in line)
+    again = parse_fbs(text, allow_includes=False)      # would fail if an include got through
+    return s, again
+
+
+def test_doc_comment_newlines_cannot_inject():
+    d = categories_bfbs()
+    d["objects"][0]["documentation"] = [' x\ninclude "../secret.txt";\ntable Evil { a: int; }']
+    s, again = _render_reparse(d)
+    assert "Evil" not in {o.short_name for o in again.objects.values()}
+    name = d["objects"][0]["name"]
+    assert again.objects[name].documentation == [" x", 'include "../secret.txt";', "table Evil { a: int; }"]
+
+
+@pytest.mark.parametrize("where, value, message", [
+    ("attribute key", 'x;\ninclude "../secret.txt";\nattribute "y', "bad attribute name"),
+    ("file_ident", 'ABCD";\ninclude "../secret.txt";\n//', "not 4 bytes"),
+    ("file_ext", 'x";\ninclude "../secret.txt";\n//', "bad file extension"),
+])
+def test_bfbs_cannot_smuggle_declarations(where, value, message):
+    d = categories_bfbs()
+    if where == "attribute key":
+        d["objects"][0]["attributes"] = [{"key": value, "value": "0"}]
+    elif where == "file_ident":
+        d["file_ident"] = value
+    else:
+        d["file_ext"] = value
+    with pytest.raises(SchemaError, match=message):
+        flatview.load_bfbs(REFL.encode(d))
+
+
+def test_render_refuses_non_identifiers_from_any_source():
+    s = parse_fbs('attribute "a"; table T { x: int (a: "v"); } root_type T;')
+    s["T"].fields[0].name = 'x; } include "/etc/passwd"; table U { y'
+    with pytest.raises(SchemaError, match="not an identifier"):
+        s.to_fbs()
+    s = parse_fbs('attribute "a"; table T { x: int (a: "v"); } root_type T;')
+    s["T"].fields[0].attributes["a"] = 'v"); } include "/etc/passwd"; table U { y: int ("'
+    again = parse_fbs(s.to_fbs(), allow_includes=False)          # value is quoted, not injected
+    assert again["T"].field("x").attributes["a"] == s["T"].fields[0].attributes["a"]
+
+
+def test_special_file_identifier_round_trips():
+    s = parse_fbs('table T { a: int; } root_type T; file_identifier "A\\"\\\\B";')
+    assert s.file_ident == 'A"\\B'
+    assert parse_fbs(s.to_fbs()).file_ident == 'A"\\B'
+
+
+# --- reads never leave the buffer they were given ---------------------------------
+
+def test_reads_confined_to_the_given_slice(kitchen_schema):
+    import random
+    from test_kitchen import blueprint_bytes
+    payload = kitchen_schema.encode({"name": "fleet", "ships": [
+        {"typeID": 1, "name": "a", "tags": ["x", "y"], "modules": [{"name": "m"}],
+         "primary_type": "Charge", "primary": {"typeID": 2}, "blueprint": blueprint_bytes(kitchen_schema)}]})
+    marker = (SECRET * 50).encode()
+    rng = random.Random(7)
+    for _ in range(1500):
+        bad = bytearray(payload)
+        for _ in range(rng.randrange(1, 4)):
+            bad[rng.randrange(len(bad))] = rng.randrange(256)
+        whole = marker + bytes(bad) + marker
+        view = memoryview(whole)[len(marker):len(marker) + len(bad)]
+        try:
+            out = repr(kitchen_schema.read(view, check_identifier=False)._asdict())
+        except Exception:
+            continue        # malformed input may fail, but must not leak
+        assert "SECRET" not in out and "hunter2" not in out

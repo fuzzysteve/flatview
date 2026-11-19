@@ -72,6 +72,11 @@ library itself has no runtime dependencies; keep it that way.
   against `max_refs` (amplification protection).
 - All decompression goes through `_io._decompress` with a size cap (`max_size`, default
   2 GiB).
+- `.fbs` includes resolve only inside `ctx.include_roots` (the main schema's directory
+  plus `include_paths`), checked on the real path. Never add a cwd fallback or follow a
+  path outside the roots.
+- `render()` must validate every name as an identifier and emit strings only via
+  `_quote()`. Doc comments are split per line, because rendered text gets parsed again.
 - Never auto-detect size prefixes. A valid buffer's root offset can equal `len - 4`
   (e.g. a root table with no fields set). Reader and verifier must agree on every
   interpretation of a buffer, nested ones included.

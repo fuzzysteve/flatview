@@ -271,9 +271,21 @@ it's up to you:
   struct and table layouts are checked before use. Generated converter
   code never contains schema text, and its cost grows linearly with schema
   size (tables over 256 fields use a generic converter).
-* **Untrusted `.fbs` schemas.** Like flatc, an `include` can read any file
-  the process can, so don't parse untrusted `.fbs` text that may use
-  includes.
+* **Untrusted `.fbs` schemas.** `include` can only reach files inside the
+  schema's own directory or the `include_paths` you pass. Paths are checked
+  after resolving symlinks and `..`, and there is no current-directory
+  fallback. Unlike flatc, an untrusted schema can't read `/etc/...` or
+  `../secret`. Schema text with no file (`parse_fbs(text)`) can only
+  include from `include_paths`. Pass `allow_includes=False` to reject
+  includes outright.
+* **Rendering.** `Schema.to_fbs()` (and `flatview schema`) refuses names
+  that aren't identifiers and escapes every string and doc comment, so a
+  schema loaded from an untrusted `.bfbs` can't inject declarations, such
+  as an `include`, into the text it produces.
+* **Code execution.** The only dynamic code is the per-table converter
+  compiled with `exec`. Its source is built from fixed templates, `repr()`
+  strings and checked integers only, never schema text. There is no
+  `pickle`, `eval`, subprocess or import driven by data.
 * **Size prefixes are never guessed.** A valid buffer's first word can
   equal its length minus 4, so pass `size_prefixed=True` explicitly.
 * **Schema names.** Enum value names that Python's `enum` module reserves

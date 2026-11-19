@@ -21,6 +21,7 @@ from ._verify import VerificationError
 
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _QUALIFIED = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*")
+_FILE_EXT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}")
 
 
 @lru_cache(maxsize=1)
@@ -33,7 +34,12 @@ def reflection_schema() -> Schema:
 def _attrs(kvs) -> dict[str, str]:
     if kvs is None:
         return {}
-    return {kv.key: kv.value if kv.value is not None else "" for kv in kvs}
+    out = {}
+    for kv in kvs:
+        if not _IDENT.fullmatch(kv.key):
+            raise SchemaError(f"invalid .bfbs: bad attribute name {kv.key!r}")
+        out[kv.key] = kv.value if kv.value is not None else ""
+    return out
 
 
 def _docs(docs) -> list[str]:
@@ -127,8 +133,14 @@ def load_bfbs(data: Any, source: str | None = None) -> Schema:
             enum.values.append(EnumVal(rv.name, rv.value, ut, _attrs(rv.attributes),
                                        _docs(rv.documentation)))
 
+    file_ident = raw.file_ident or None
+    if file_ident is not None and len(file_ident.encode("utf-8")) != 4:
+        raise SchemaError(f"invalid .bfbs: file identifier {file_ident!r} is not 4 bytes")
+    file_ext = raw.file_ext or None
+    if file_ext is not None and not _FILE_EXT.fullmatch(file_ext):
+        raise SchemaError(f"invalid .bfbs: bad file extension {file_ext!r}")
     schema = Schema(objects={o.name: o for o in objects}, enums={e.name: e for e in enums},
-                    file_ident=raw.file_ident or None, file_ext=raw.file_ext or None, source=source)
+                    file_ident=file_ident, file_ext=file_ext, source=source)
     if len(schema.objects) != len(objects) or len(schema.enums) != len(enums):
         raise SchemaError("invalid .bfbs: duplicate type names")
     rt = raw.root_table

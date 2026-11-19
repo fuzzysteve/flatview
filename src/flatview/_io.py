@@ -105,10 +105,12 @@ def _read_capped(fh, path: str, limit: int) -> bytes:
 
 
 def load_schema(source: PathLike | bytes | Schema, include_paths: list[str] | None = None,
-                max_size: int = MAX_DECOMPRESSED) -> Schema:
+                max_size: int = MAX_DECOMPRESSED, allow_includes: bool = True) -> Schema:
     """Load a schema from a .fbs or .bfbs file (or raw bytes); gzip is fine.
 
     The format is detected from content (``BFBS`` identifier), not extension.
+    ``.fbs`` includes are confined to the schema's directory and
+    ``include_paths``; ``allow_includes=False`` rejects them altogether.
     """
     if isinstance(source, Schema):
         return source
@@ -123,7 +125,7 @@ def load_schema(source: PathLike | bytes | Schema, include_paths: list[str] | No
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise SchemaError(f"{name} is neither a .bfbs binary schema nor UTF-8 .fbs text") from None
-    return parse_fbs(text, name, include_paths)
+    return parse_fbs(text, name, include_paths, allow_includes=allow_includes)
 
 
 def _stem(path: str) -> str:
