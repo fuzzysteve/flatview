@@ -304,3 +304,14 @@ def test_strict_table_size(kitchen_schema):
     kitchen_schema.verify(bad)
     with pytest.raises(VerificationError, match="past the end of its table"):
         kitchen_schema.verify(bad, strict_table_size=True)
+
+
+@pytest.mark.parametrize("opts", [{}, {"defaults": False}, {"enums": "name"}, {"enums": "value", "deprecated": True}])
+def test_asdict_same_for_bytes_and_memoryview(kitchen_schema, fleet, opts):
+    plain = kitchen_schema.encode(fleet)                       # bytes: fast "raw" decode path
+    prefixed = kitchen_schema.encode(fleet, size_prefixed=True)  # sliced memoryview path
+    a = kitchen_schema.read(plain)._asdict(**opts)
+    b = kitchen_schema.read(prefixed)._asdict(**opts)
+    assert a == b
+    assert a["ships"][1]["blueprint"]["runs"] == 7               # nested buffer converted
+    assert flatview.to_python(kitchen_schema.read(plain).ships, **opts) == a["ships"]

@@ -318,6 +318,12 @@ class StructVector(Vector):
     def _at(self, i: int):
         return self._cls(self._buf, self._start + i * self._stride)
 
+    def _aslist(self, *, defaults=True, enums="member", deprecated=False) -> list:
+        from ._todict import converter
+        conv = converter(self._cls._schema, self._cls._object, defaults, enums, deprecated)
+        s = self._stride
+        return [conv(self._buf, p) for p in range(self._start, self._start + s * self._len, s)]
+
 
 class TableVector(Vector):
     """Vector of tables. If the table has a ``key`` field, supports lookup."""
@@ -334,6 +340,12 @@ class TableVector(Vector):
 
     def _at(self, i: int):
         return self._cls(self._buf, self._pos_at(i))
+
+    def _aslist(self, *, defaults=True, enums="member", deprecated=False) -> list:
+        from ._todict import converter, fast_buffer
+        buf, raw = fast_buffer(self._buf)
+        conv = converter(self._cls._schema, self._cls._object, defaults, enums, deprecated, raw)
+        return [conv(buf, p + _u32(buf, p)[0]) for p in range(self._start, self._start + 4 * self._len, 4)]
 
     # -- keyed access ------------------------------------------------------
     @property
@@ -768,18 +780,12 @@ def _plain(v: Any, defaults: bool, enums: str, deprecated: bool) -> Any:
 
 
 def _to_python(view: TableView | StructView, defaults: bool, enums: str, deprecated: bool) -> dict:
-    out: dict[str, Any] = {}
-    obj = view._object
-    is_table = isinstance(view, TableView)
-    for f in obj.fields:
-        if f.deprecated and not deprecated:
-            continue
-        # Key fields are always emitted (as flatc --json does): writers omit a
-        # key equal to its default, but it is still the row's identity.
-        if is_table and not defaults and not f.key and not view._has(f.name):
-            continue
-        out[f.name] = _plain(view._getters[f.name](view), defaults, enums, deprecated)
-    return out
+    # Compiled per-table converters (see _todict). Key fields are always
+    # emitted, as flatc --json does: writers omit a key equal to its default,
+    # but it is still the row's identity.
+    from ._todict import converter, fast_buffer
+    buf, raw = fast_buffer(view._buf)
+    return converter(view._schema, view._object, defaults, enums, deprecated, raw)(buf, view._pos)
 
 
 def to_python(value: Any, *, defaults: bool = True, enums: str = "member",

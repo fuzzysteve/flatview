@@ -49,11 +49,31 @@ exactly like `flatc --json`, `types.fb` (150 MB) included.
 | Single lookup, typeID 587 | ~0.01 ms | 1.1 ms | ~80× |
 | Sum one attribute over ~1M typeDogma entries | 0.57 s | 3.2 s | 5.7× |
 | All `planetIDs` vectors to lists | 19 ms | 205 ms | 11× |
-| Decode all of types.fb to Python objects | 2.35 s | 4.34 s | 1.8× |
+| Decode all of types.fb to Python objects | 0.81 s | 4.38 s | 5.4× |
 
 Why: each schema field becomes a generated property that does one vtable
 probe and one `struct.unpack_from`, with nothing worked out per call; scalar
-vectors decode in a single C call; keyed vectors are binary-searched.
+vectors decode in a single C call; keyed vectors are binary-searched. Whole-tree
+conversion (`_asdict()`) uses a converter compiled per table type, which reads
+each vtable in one call and creates no intermediate view objects.
+
+### Against JSON too
+
+`benchmarks/bench_three_way.py`: flatview and the official library read
+`types.fb`, the standard library `json` module reads the SDE's `types.jsonl`
+export of the same build (153 MB). Each run is a fresh process and includes
+opening the file; cells are wall time / peak Python heap.
+
+| Scenario | flatview | official | json |
+|---|---|---|---|
+| Look up one type (early id 587) | 0.7 ms / 0 MB | 76 ms / 143 MB | 4.0 ms / 0.1 MB |
+| Look up one type (last id) | 0.8 ms / 0 MB | 334 ms / 143 MB | 757 ms / 0.3 MB |
+| 1,000 lookups (others build an index first) | 20 ms / 0.1 MB | 355 ms / 153 MB | 917 ms / 262 MB |
+| Scan all rows, 4 fields | 186 ms / 0 MB | 774 ms / 143 MB | 782 ms / 0.3 MB |
+| Everything as Python objects | 780 ms / 215 MB | 4440 ms / 332 MB | 899 ms / 260 MB |
+
+For the official library, "everything as Python objects" means its object API
+(`--gen-object-api`); flatview and json produce plain dicts and lists.
 
 ### Memory
 
@@ -79,6 +99,7 @@ uv run pytest                 # full suite
 uv run pytest -m "not sde_full"   # skip the big-file tests (fast, ~1 s)
 uv run python scripts/fetch_sde_examples.py   # fetch SDE files for sde_full tests/benchmarks
 uv run --group bench python benchmarks/bench_vs_official.py
+uv run --group bench python benchmarks/bench_three_way.py   # + stdlib json on the JSONL export
 uv run --group bench python benchmarks/bench_memory.py
 ```
 
