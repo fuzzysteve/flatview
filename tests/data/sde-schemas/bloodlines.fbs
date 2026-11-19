@@ -1,0 +1,34 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.bloodlines;
+
+table Bloodlines {
+  bloodlineID: int (id: 0, key);
+  charisma: int (id: 1);
+  corporationID: int (id: 2);
+  description: Localized (id: 3);
+  iconID: int = null (id: 4);
+  intelligence: int (id: 5);
+  memory: int (id: 6);
+  name: Localized (id: 7, required);
+  perception: int (id: 8);
+  raceID: int (id: 9);
+  willpower: int (id: 10);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table BloodlinesTable {
+  rows: [Bloodlines] (id: 0, required);
+}
+
+root_type BloodlinesTable;

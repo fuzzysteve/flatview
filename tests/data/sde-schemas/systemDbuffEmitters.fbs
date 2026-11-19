@@ -1,0 +1,25 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.systemDbuffEmitters;
+
+table SystemDbuffEmitters {
+  typeID: int (id: 0, key);
+  dbuffs: [SystemDbuffEmittersDbuffs] (id: 1);
+  duration: int = null (id: 2);
+  excludeProtected: bool = null (id: 3);
+  interval: int = null (id: 4);
+}
+
+table SystemDbuffEmittersDbuffs {
+  dbuffCollectionID: int (id: 0, key);
+  value: double (id: 1, sde_value);
+}
+
+table SystemDbuffEmittersTable {
+  rows: [SystemDbuffEmitters] (id: 0, required);
+}
+
+root_type SystemDbuffEmittersTable;

@@ -1,0 +1,58 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.mapSolarSystems;
+
+table MapSolarSystems {
+  solarSystemID: int (id: 0, key);
+  border: bool = null (id: 1);
+  constellationID: int (id: 2);
+  corridor: bool = null (id: 3);
+  disallowedAnchorCategories: [int] (id: 4);
+  disallowedAnchorGroups: [int] (id: 5);
+  factionID: int = null (id: 6);
+  fringe: bool = null (id: 7);
+  hub: bool = null (id: 8);
+  international: bool = null (id: 9);
+  luminosity: double = null (id: 10);
+  name: Localized (id: 11, required);
+  planetIDs: [int] (id: 12, required);
+  position: MapSolarSystemsPosition (id: 13, required);
+  position2D: MapSolarSystemsPosition2D (id: 14);
+  radius: double (id: 15);
+  regionID: int (id: 16);
+  regional: bool = null (id: 17);
+  securityClass: string (id: 18);
+  securityStatus: double (id: 19);
+  starID: int = null (id: 20);
+  stargateIDs: [int] (id: 21, required);
+  visualEffect: string (id: 22);
+  wormholeClassID: int = null (id: 23);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table MapSolarSystemsPosition {
+  x: double (id: 0);
+  y: double (id: 1);
+  z: double (id: 2);
+}
+
+table MapSolarSystemsPosition2D {
+  x: double (id: 0);
+  y: double (id: 1);
+}
+
+table MapSolarSystemsTable {
+  rows: [MapSolarSystems] (id: 0, required);
+}
+
+root_type MapSolarSystemsTable;

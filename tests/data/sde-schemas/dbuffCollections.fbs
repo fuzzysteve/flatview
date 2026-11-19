@@ -1,0 +1,51 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.dbuffCollections;
+
+table DbuffCollections {
+  dbuffCollectionID: int (id: 0, key);
+  aggregateMode: string (id: 1, required);
+  developerDescription: string (id: 2, required);
+  displayName: Localized (id: 3);
+  itemModifiers: [DbuffCollectionsItemModifiers] (id: 4, required);
+  locationGroupModifiers: [DbuffCollectionsLocationGroupModifiers] (id: 5, required);
+  locationModifiers: [DbuffCollectionsLocationModifiers] (id: 6, required);
+  locationRequiredSkillModifiers: [DbuffCollectionsLocationRequiredSkillModifiers] (id: 7, required);
+  operationName: string (id: 8, required);
+  showOutputValueInUI: string (id: 9, required);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table DbuffCollectionsItemModifiers {
+  dogmaAttributeID: int (id: 0);
+}
+
+table DbuffCollectionsLocationGroupModifiers {
+  dogmaAttributeID: int (id: 0);
+  groupID: int (id: 1);
+}
+
+table DbuffCollectionsLocationModifiers {
+  dogmaAttributeID: int (id: 0);
+}
+
+table DbuffCollectionsLocationRequiredSkillModifiers {
+  dogmaAttributeID: int (id: 0);
+  skillID: int (id: 1);
+}
+
+table DbuffCollectionsTable {
+  rows: [DbuffCollections] (id: 0, required);
+}
+
+root_type DbuffCollectionsTable;

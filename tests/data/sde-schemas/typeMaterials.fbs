@@ -1,0 +1,26 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.typeMaterials;
+
+table TypeMaterials {
+  typeID: int (id: 0, key);
+  materials: [TypeMaterialsMaterials] (id: 1, required);
+  randomizedMaterials: [TypeMaterialsRandomizedMaterials] (id: 2);
+}
+
+table TypeMaterialsMaterials {
+  materialTypeID: int (id: 0);
+  quantity: int (id: 1);
+}
+
+table TypeMaterialsRandomizedMaterials {
+  materialTypeID: int (id: 0);
+  quantityMax: int (id: 1);
+  quantityMin: int (id: 2);
+}
+
+table TypeMaterialsTable {
+  rows: [TypeMaterials] (id: 0, required);
+}
+
+root_type TypeMaterialsTable;

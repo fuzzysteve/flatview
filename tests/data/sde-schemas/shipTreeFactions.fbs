@@ -1,0 +1,35 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.shipTreeFactions;
+
+table ShipTreeFactions {
+  factionID: int (id: 0, key);
+  description: Localized (id: 1, required);
+  elements: [ShipTreeFactionsElements] (id: 2, required);
+  icon: string (id: 3, required);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table ShipTreeFactionsElements {
+  position: int (id: 0, key);
+  elementID: int (id: 1, sde_value);
+}
+
+table ShipTreeFactionsTable {
+  rows: [ShipTreeFactions] (id: 0, required);
+}
+
+root_type ShipTreeFactionsTable;

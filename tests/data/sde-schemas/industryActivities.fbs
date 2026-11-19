@@ -1,0 +1,15 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.industryActivities;
+
+table IndustryActivities {
+  activityID: int (id: 0, key);
+  description: string (id: 1, required);
+  name: string (id: 2, required);
+}
+
+table IndustryActivitiesTable {
+  rows: [IndustryActivities] (id: 0, required);
+}
+
+root_type IndustryActivitiesTable;

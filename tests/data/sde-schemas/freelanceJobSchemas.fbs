@@ -1,0 +1,118 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.freelanceJobSchemas;
+
+table FreelanceJobSchemas {
+  major: int (id: 0, key);
+  schemas: [Schema] (id: 1, required, sde_value);
+}
+
+table Schema {
+  name: string (id: 0, key, required);
+  contentTags: [string] (id: 1, required);
+  contributionMultiplier: Multiplier (id: 2);
+  description: Localized (id: 3, required);
+  iconID: string (id: 4, required);
+  maxContributionsPerParticipant: Limit (id: 5);
+  maxProgressPerContribution: Limit (id: 6);
+  parameters: [Parameter] (id: 7, required);
+  progressDescription: Localized (id: 8, required);
+  rewardDescription: Localized (id: 9, required);
+  targetDescription: Localized (id: 10, required);
+  title: Localized (id: 11, required);
+}
+
+table Multiplier {
+  defaultValue: double = null (id: 0);
+  description: Localized (id: 1, required);
+  iconID: string (id: 2, required);
+  maxValue: double (id: 3);
+  minValue: double (id: 4);
+  title: Localized (id: 5, required);
+  unsetDescription: Localized (id: 6, required);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table Limit {
+  description: Localized (id: 0, required);
+  iconID: string (id: 1, required);
+  title: Localized (id: 2, required);
+  unsetDescription: Localized (id: 3, required);
+}
+
+table Parameter {
+  key: string (id: 0, key, required);
+  boolean: Boolean (id: 1);
+  itemDelivery: ItemDelivery (id: 2);
+  matcher: Matcher (id: 3);
+}
+
+table Boolean {
+  choiceLabel: Localized (id: 0, required);
+  default: bool (id: 1);
+  description: Localized (id: 2, required);
+  iconID: string (id: 3, required);
+  optionFalse: Option (id: 4, required);
+  optionTrue: Option (id: 5, required);
+  title: Localized (id: 6, required);
+}
+
+table Option {
+  description: Localized (id: 0, required);
+  title: Localized (id: 1, required);
+}
+
+table ItemDelivery {
+  deliveryLocation: DeliveryLocation (id: 0, required);
+  description: Localized (id: 1, required);
+  iconID: string (id: 2, required);
+  inventoryType: InventoryType (id: 3, required);
+  title: Localized (id: 4, required);
+}
+
+table DeliveryLocation {
+  acceptedValueTypes: [string] (id: 0, required);
+  description: Localized (id: 1, required);
+  iconID: string (id: 2, required);
+  maxEntries: int (id: 3);
+  title: Localized (id: 4, required);
+  unsetDescription: Localized (id: 5);
+}
+
+table InventoryType {
+  acceptedValueTypes: [string] (id: 0, required);
+  description: Localized (id: 1, required);
+  iconID: string (id: 2, required);
+  title: Localized (id: 3, required);
+  unsetDescription: Localized (id: 4);
+}
+
+table Matcher {
+  acceptedValueTypes: [string] (id: 0, required);
+  description: Localized (id: 1, required);
+  iconID: string (id: 2, required);
+  maxEntries: int (id: 3);
+  optional: bool (id: 4);
+  title: Localized (id: 5, required);
+  type: string (id: 6, required);
+  unsetDescription: Localized (id: 7);
+}
+
+table FreelanceJobSchemasTable {
+  rows: [FreelanceJobSchemas] (id: 0, required);
+}
+
+root_type FreelanceJobSchemasTable;

@@ -1,0 +1,63 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.mapMoons;
+
+table MapMoons {
+  moonID: int (id: 0, key);
+  attributes: MapMoonsAttributes (id: 1, required);
+  celestialIndex: int (id: 2);
+  uniqueName: Localized (id: 3);
+  npcStationIDs: [int] (id: 4);
+  orbitID: int (id: 5);
+  orbitIndex: int (id: 6);
+  position: MapMoonsPosition (id: 7, required);
+  radius: double (id: 8);
+  solarSystemID: int (id: 9);
+  statistics: MapMoonsStatistics (id: 10);
+  typeID: int (id: 11);
+}
+
+table MapMoonsAttributes {
+  heightMap1: int (id: 0);
+  heightMap2: int (id: 1);
+  shaderPreset: int (id: 2);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table MapMoonsPosition {
+  x: double (id: 0);
+  y: double (id: 1);
+  z: double (id: 2);
+}
+
+table MapMoonsStatistics {
+  density: double (id: 0);
+  eccentricity: double (id: 1);
+  escapeVelocity: double (id: 2);
+  locked: bool (id: 3);
+  massDust: double (id: 4);
+  massGas: double = null (id: 5);
+  orbitPeriod: double (id: 6);
+  orbitRadius: double (id: 7);
+  pressure: double (id: 8);
+  rotationRate: double (id: 9);
+  spectralClass: string (id: 10, required);
+  surfaceGravity: double (id: 11);
+  temperature: double (id: 12);
+}
+
+table MapMoonsTable {
+  rows: [MapMoons] (id: 0, required);
+}
+
+root_type MapMoonsTable;

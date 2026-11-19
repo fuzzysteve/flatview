@@ -1,0 +1,42 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.industryAssemblyLines;
+
+table IndustryAssemblyLines {
+  assemblyLineID: int (id: 0, key);
+  activityID: int (id: 1);
+  baseCostMultiplier: double = null (id: 2);
+  baseMaterialMultiplier: double (id: 3);
+  baseTimeMultiplier: double (id: 4);
+  description: string (id: 5);
+  detailsPerCategory: [IndustryAssemblyLinesDetailsPerCategory] (id: 6, required);
+  detailsPerGroup: [IndustryAssemblyLinesDetailsPerGroup] (id: 7, required);
+  detailsPerTypeList: [IndustryAssemblyLinesDetailsPerTypeList] (id: 8);
+  name: string (id: 9, required);
+}
+
+table IndustryAssemblyLinesDetailsPerCategory {
+  categoryID: int (id: 0);
+  costMultiplier: double = null (id: 1);
+  materialMultiplier: double (id: 2);
+  timeMultiplier: double (id: 3);
+}
+
+table IndustryAssemblyLinesDetailsPerGroup {
+  costMultiplier: double = null (id: 0);
+  groupID: int (id: 1);
+  materialMultiplier: double (id: 2);
+  timeMultiplier: double (id: 3);
+}
+
+table IndustryAssemblyLinesDetailsPerTypeList {
+  materialMultiplier: double (id: 0);
+  timeMultiplier: double (id: 1);
+  typeListID: int (id: 2);
+}
+
+table IndustryAssemblyLinesTable {
+  rows: [IndustryAssemblyLines] (id: 0, required);
+}
+
+root_type IndustryAssemblyLinesTable;

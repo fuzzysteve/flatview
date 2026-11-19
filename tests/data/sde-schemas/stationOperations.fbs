@@ -1,0 +1,44 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.stationOperations;
+
+table StationOperations {
+  operationID: int (id: 0, key);
+  activityID: int (id: 1);
+  border: double (id: 2);
+  corridor: double (id: 3);
+  description: Localized (id: 4);
+  fringe: double (id: 5);
+  hub: double (id: 6);
+  manufacturingFactor: double (id: 7);
+  operationName: Localized (id: 8, required);
+  ratio: double (id: 9);
+  researchFactor: double (id: 10);
+  services: [int] (id: 11, required);
+  stationTypes: [StationOperationsStationTypes] (id: 12);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table StationOperationsStationTypes {
+  raceID: int (id: 0, key);
+  typeID: int (id: 1, sde_value);
+}
+
+table StationOperationsTable {
+  rows: [StationOperations] (id: 0, required);
+}
+
+root_type StationOperationsTable;

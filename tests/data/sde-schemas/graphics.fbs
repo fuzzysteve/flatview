@@ -1,0 +1,20 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.graphics;
+
+table Graphics {
+  graphicID: int (id: 0, key);
+  graphicFile: string (id: 1);
+  iconFolder: string (id: 2);
+  sofFactionName: string (id: 3);
+  sofHullName: string (id: 4);
+  sofLayout: [string] (id: 5);
+  sofMaterialSetID: int = null (id: 6);
+  sofRaceName: string (id: 7);
+}
+
+table GraphicsTable {
+  rows: [Graphics] (id: 0, required);
+}
+
+root_type GraphicsTable;

@@ -1,0 +1,24 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.appliedProximityEffects;
+
+table AppliedProximityEffects {
+  typeID: int (id: 0, key);
+  dbuffs: [AppliedProximityEffectsDbuffs] (id: 1);
+  delaySeconds: int = null (id: 2);
+  radius: int = null (id: 3);
+}
+
+table AppliedProximityEffectsDbuffs {
+  dbuffID: int (id: 0, key);
+  value: double (id: 1, sde_value);
+}
+
+table AppliedProximityEffectsTable {
+  rows: [AppliedProximityEffects] (id: 0, required);
+}
+
+root_type AppliedProximityEffectsTable;

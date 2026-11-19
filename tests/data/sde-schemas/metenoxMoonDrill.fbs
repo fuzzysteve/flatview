@@ -1,0 +1,16 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.metenoxMoonDrill;
+
+table MetenoxMoonDrill {
+  typeID: int (id: 0, key);
+  miningCycleTime: int = null (id: 1);
+  miningEfficiency: double = null (id: 2);
+  reagentsConsumedPerCycle: int = null (id: 3);
+}
+
+table MetenoxMoonDrillTable {
+  rows: [MetenoxMoonDrill] (id: 0, required);
+}
+
+root_type MetenoxMoonDrillTable;

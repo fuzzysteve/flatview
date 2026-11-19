@@ -1,0 +1,91 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.militaryCampaignObjectives;
+
+table MilitaryCampaignObjectives {
+  objectiveID: string (id: 0, key, required);
+  annotations: Annotations (id: 1, required);
+  campaignID: string (id: 2, required);
+  careerPath: string (id: 3, required);
+  contentTags: [string] (id: 4, required);
+  contributionMethodConfiguration: Configuration (id: 5, required);
+  issuer: Issuer (id: 6, required);
+  maxProgressPerParticipant: long (id: 7);
+  presentingCharacterID: long (id: 8);
+  rewards: Rewards (id: 9, required);
+  subtitle: Localized (id: 10, required);
+  targetProgress: long (id: 11);
+  title: Localized (id: 12, required);
+}
+
+table Annotations {
+  requiredEnlistmentWithFactionID: int = null (id: 0);
+  restrictionTooltip: Localized (id: 1);
+  warning1: Localized (id: 2);
+  warning2: Localized (id: 3);
+  warning3: Localized (id: 4);
+  warning4: Localized (id: 5);
+  warning5: Localized (id: 6);
+  warning6: Localized (id: 7);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table Configuration {
+  name: string (id: 0, required);
+  parameters: [Parameter] (id: 1, required);
+}
+
+table Parameter {
+  key: string (id: 0, required);
+  matcher: Matcher (id: 1);
+}
+
+table Matcher {
+  values: [MatcherValues] (id: 0, required);
+}
+
+table MatcherValues {
+  valueType: string (id: 0, required);
+  values: [string] (id: 1);
+}
+
+table Issuer {
+  allianceID: int = null (id: 0);
+  characterID: long = null (id: 1);
+  corporationID: int = null (id: 2);
+  factionID: int = null (id: 3);
+}
+
+table Rewards {
+  isk: Reward (id: 0);
+  lp: Reward (id: 1);
+  standing: Standing (id: 2);
+}
+
+table Reward {
+  amountPerInterval: long (id: 0);
+  issuer: Issuer (id: 1, required);
+  progressInterval: int (id: 2);
+}
+
+table Standing {
+  gainPercentPerInterval: double (id: 0);
+  issuer: Issuer (id: 1, required);
+  progressInterval: int (id: 2);
+}
+
+table MilitaryCampaignObjectivesTable {
+  rows: [MilitaryCampaignObjectives] (id: 0, required);
+}
+
+root_type MilitaryCampaignObjectivesTable;

@@ -1,0 +1,24 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.planetResources;
+
+table PlanetResources {
+  celestialID: int (id: 0, key);
+  power: int (id: 1);
+  reagent: Reagent (id: 2);
+  workforce: int = null (id: 3);
+}
+
+table Reagent {
+  amount_per_cycle: int (id: 0);
+  cycle_period: int (id: 1);
+  secured_capacity: int (id: 2);
+  type_id: int (id: 3);
+  unsecured_capacity: int (id: 4);
+}
+
+table PlanetResourcesTable {
+  rows: [PlanetResources] (id: 0, required);
+}
+
+root_type PlanetResourcesTable;

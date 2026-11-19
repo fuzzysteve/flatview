@@ -1,0 +1,100 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+// In the JSONL, this enum is written as the name of its value, not its number.
+attribute "sde_enum_name";
+
+namespace sde.npcCorporations;
+
+enum Extent: int {
+  C = 0,
+  G = 1,
+  L = 2,
+  N = 3,
+  R = 4,
+}
+
+enum Size: int {
+  H = 0,
+  L = 1,
+  M = 2,
+  S = 3,
+  T = 4,
+}
+
+table NpcCorporations {
+  corporationID: int (id: 0, key);
+  allowedMemberRaces: [int] (id: 1);
+  ceoID: int = null (id: 2);
+  corporationTrades: [NpcCorporationsCorporationTrades] (id: 3);
+  deleted: bool (id: 4);
+  description: Localized (id: 5);
+  divisions: [NpcCorporationsDivisions] (id: 6);
+  enemyID: int = null (id: 7);
+  exchangeRates: [NpcCorporationsExchangeRates] (id: 8);
+  extent: Extent (id: 9, sde_enum_name);
+  factionID: int = null (id: 10);
+  friendID: int = null (id: 11);
+  hasPlayerPersonnelManager: bool (id: 12);
+  iconID: int = null (id: 13);
+  initialPrice: int (id: 14);
+  investors: [NpcCorporationsInvestors] (id: 15);
+  lpOfferTables: [int] (id: 16);
+  mainActivityID: int = null (id: 17);
+  memberLimit: int (id: 18);
+  minSecurity: double (id: 19);
+  minimumJoinStanding: int (id: 20);
+  name: Localized (id: 21, required);
+  raceID: int = null (id: 22);
+  secondaryActivityID: int = null (id: 23);
+  sendCharTerminationMessage: bool (id: 24);
+  shares: long (id: 25);
+  size: Size (id: 26, sde_enum_name);
+  sizeFactor: double = null (id: 27);
+  solarSystemID: int = null (id: 28);
+  stationID: int = null (id: 29);
+  taxRate: double (id: 30);
+  tickerName: string (id: 31, required);
+  uniqueName: bool (id: 32);
+}
+
+table NpcCorporationsCorporationTrades {
+  typeID: int (id: 0, key);
+  value: double (id: 1, sde_value);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table NpcCorporationsDivisions {
+  divisionID: int (id: 0, key);
+  divisionNumber: int (id: 1);
+  leaderID: int (id: 2);
+  size: int = null (id: 3);
+}
+
+table NpcCorporationsExchangeRates {
+  corporationID: int (id: 0, key);
+  rate: double (id: 1, sde_value);
+}
+
+table NpcCorporationsInvestors {
+  corporationID: int (id: 0, key);
+  shares: int (id: 1, sde_value);
+}
+
+table NpcCorporationsTable {
+  rows: [NpcCorporations] (id: 0, required);
+}
+
+root_type NpcCorporationsTable;

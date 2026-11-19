@@ -1,0 +1,35 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.graphicMaterialSets;
+
+table GraphicMaterialSets {
+  materialSetID: int (id: 0, key);
+  colorHull: Color (id: 1);
+  colorPrimary: Color (id: 2);
+  colorSecondary: Color (id: 3);
+  colorWindow: Color (id: 4);
+  custommaterial1: string (id: 5);
+  custommaterial2: string (id: 6);
+  description: string (id: 7);
+  material1: string (id: 8);
+  material2: string (id: 9);
+  material3: string (id: 10);
+  material4: string (id: 11);
+  resPathInsert: string (id: 12);
+  sofFactionName: string (id: 13);
+  sofPatternName: string (id: 14);
+  sofRaceHint: string (id: 15);
+}
+
+table Color {
+  r: double (id: 0);
+  g: double (id: 1);
+  b: double (id: 2);
+  a: double (id: 3);
+}
+
+table GraphicMaterialSetsTable {
+  rows: [GraphicMaterialSets] (id: 0, required);
+}
+
+root_type GraphicMaterialSetsTable;

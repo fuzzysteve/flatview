@@ -1,0 +1,48 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.types;
+
+table Types {
+  typeID: int (id: 0, key);
+  basePrice: double = null (id: 1);
+  capacity: double = null (id: 2);
+  description: Localized (id: 3);
+  factionID: int = null (id: 4);
+  graphicID: int = null (id: 5);
+  groupID: int (id: 6);
+  iconID: int = null (id: 7);
+  isDynamicType: bool = null (id: 8);
+  isRepackable: bool = null (id: 9);
+  mass: double = null (id: 10);
+  marketGroupID: int = null (id: 11);
+  metaGroupID: int = null (id: 12);
+  metaLevel: int = null (id: 13);
+  name: Localized (id: 14, required);
+  packagedVolume: double = null (id: 15);
+  portionSize: int = null (id: 16);
+  published: bool = null (id: 17);
+  raceID: int = null (id: 18);
+  radius: double = null (id: 19);
+  shipTreeGroupID: int = null (id: 20);
+  soundID: int = null (id: 21);
+  techLevel: int = null (id: 22);
+  variationParentTypeID: int = null (id: 23);
+  volume: double = null (id: 24);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table TypesTable {
+  rows: [Types] (id: 0, required);
+}
+
+root_type TypesTable;

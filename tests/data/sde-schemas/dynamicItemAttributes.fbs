@@ -1,0 +1,27 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.dynamicItemAttributes;
+
+table DynamicItemAttributes {
+  typeID: int (id: 0, key);
+  attributeIDs: [DynamicItemAttributesAttributeIDs] (id: 1, required);
+  inputOutputMapping: [DynamicItemAttributesInputOutputMapping] (id: 2, required);
+}
+
+table DynamicItemAttributesAttributeIDs {
+  attributeID: int (id: 0, key);
+  highIsGood: bool = null (id: 1);
+  max: double (id: 2);
+  min: double (id: 3);
+}
+
+table DynamicItemAttributesInputOutputMapping {
+  applicableTypes: [int] (id: 0, required);
+  resultingType: int (id: 1);
+}
+
+table DynamicItemAttributesTable {
+  rows: [DynamicItemAttributes] (id: 0, required);
+}
+
+root_type DynamicItemAttributesTable;

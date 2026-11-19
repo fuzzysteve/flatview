@@ -1,0 +1,25 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.sovereigntyUpgrades;
+
+table SovereigntyUpgrades {
+  typeID: int (id: 0, key);
+  fuel: SovereigntyUpgradesFuel (id: 1);
+  mutually_exclusive_group: string (id: 2, required);
+  power_allocation: int (id: 3);
+  power_production: int (id: 4);
+  workforce_allocation: int (id: 5);
+  workforce_production: int (id: 6);
+}
+
+table SovereigntyUpgradesFuel {
+  hourly_upkeep: int (id: 0);
+  startup_cost: int (id: 1);
+  type_id: int (id: 2);
+}
+
+table SovereigntyUpgradesTable {
+  rows: [SovereigntyUpgrades] (id: 0, required);
+}
+
+root_type SovereigntyUpgradesTable;

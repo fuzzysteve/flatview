@@ -1,0 +1,31 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.npcStations;
+
+table NpcStations {
+  stationID: int (id: 0, key);
+  celestialIndex: int = null (id: 1);
+  operationID: int (id: 2);
+  orbitID: int (id: 3);
+  orbitIndex: int = null (id: 4);
+  ownerID: int (id: 5);
+  position: Position (id: 6, required);
+  reprocessingEfficiency: double (id: 7);
+  reprocessingHangarFlag: int (id: 8);
+  reprocessingStationsTake: double (id: 9);
+  solarSystemID: int (id: 10);
+  typeID: int (id: 11);
+  useOperationName: bool (id: 12);
+}
+
+table Position {
+  x: double (id: 0);
+  y: double (id: 1);
+  z: double (id: 2);
+}
+
+table NpcStationsTable {
+  rows: [NpcStations] (id: 0, required);
+}
+
+root_type NpcStationsTable;

@@ -1,0 +1,14 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.agentTypes;
+
+table AgentTypes {
+  agentTypeID: int (id: 0, key);
+  name: string (id: 1, required);
+}
+
+table AgentTypesTable {
+  rows: [AgentTypes] (id: 0, required);
+}
+
+root_type AgentTypesTable;

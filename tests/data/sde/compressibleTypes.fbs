@@ -1,0 +1,14 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.compressibleTypes;
+
+table CompressibleTypes {
+  typeID: int (id: 0, key);
+  compressedTypeID: int (id: 1);
+}
+
+table CompressibleTypesTable {
+  rows: [CompressibleTypes] (id: 0, required);
+}
+
+root_type CompressibleTypesTable;

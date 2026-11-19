@@ -1,0 +1,27 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.categories;
+
+table Categories {
+  categoryID: int (id: 0, key);
+  iconID: int = null (id: 1);
+  name: Localized (id: 2, required);
+  published: bool (id: 3);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table CategoriesTable {
+  rows: [Categories] (id: 0, required);
+}
+
+root_type CategoriesTable;

@@ -1,0 +1,29 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.mercenaryTacticalOperations;
+
+table MercenaryTacticalOperations {
+  dungeonID: int (id: 0, key);
+  anarchyImpact: int (id: 1);
+  description: Localized (id: 2, required);
+  developmentImpact: int (id: 3);
+  infomorphBonus: int (id: 4);
+  name: Localized (id: 5, required);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table MercenaryTacticalOperationsTable {
+  rows: [MercenaryTacticalOperations] (id: 0, required);
+}
+
+root_type MercenaryTacticalOperationsTable;

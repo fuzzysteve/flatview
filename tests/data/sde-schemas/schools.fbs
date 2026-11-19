@@ -1,0 +1,35 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.schools;
+
+table Schools {
+  schoolID: int (id: 0, key);
+  careerAgents: [int] (id: 1);
+  careerID: int (id: 2);
+  characterDescription: Localized (id: 3);
+  corporationID: int (id: 4);
+  description: Localized (id: 5);
+  iconID: int = null (id: 6);
+  isStarterSpaceSchool: bool = null (id: 7);
+  name: Localized (id: 8, required);
+  raceID: int (id: 9);
+  startingStations: [int] (id: 10);
+  title: Localized (id: 11);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table SchoolsTable {
+  rows: [Schools] (id: 0, required);
+}
+
+root_type SchoolsTable;

@@ -1,0 +1,34 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.linkWithShip;
+
+table LinkWithShip {
+  typeID: int (id: 0, key);
+  applyPvpFlag: bool = null (id: 1);
+  canRelink: bool = null (id: 2);
+  characterEnergyCost: double = null (id: 3);
+  dbuffPostLinkDuration: int = null (id: 4);
+  dbuffs: [LinkWithShipDbuffs] (id: 5);
+  generateCynoInhibitor: bool = null (id: 6);
+  keepDbuffDurationOnLinkBreak: bool = null (id: 7);
+  linkDuration: int = null (id: 8);
+  linkEffectGraphicIDOverride: int = null (id: 9);
+  linkableShipTypeListID: int = null (id: 10);
+  maxLinkRange: int = null (id: 11);
+  omegaOnly: bool = null (id: 12);
+  solarsystemInterferenceCost: double = null (id: 13);
+}
+
+table LinkWithShipDbuffs {
+  dbuffID: int (id: 0, key);
+  value: double (id: 1, sde_value);
+}
+
+table LinkWithShipTable {
+  rows: [LinkWithShip] (id: 0, required);
+}
+
+root_type LinkWithShipTable;

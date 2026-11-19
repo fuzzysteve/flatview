@@ -1,0 +1,22 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.skinrTierThresholds;
+
+table SkinrTierThresholds {
+  infoBubbleGroupID: int (id: 0, key);
+  tiers: [SkinrTierThresholdsTiers] (id: 1, required, sde_value);
+}
+
+table SkinrTierThresholdsTiers {
+  level: int (id: 0, key);
+  maxPoints: int (id: 1, sde_value);
+}
+
+table SkinrTierThresholdsTable {
+  rows: [SkinrTierThresholds] (id: 0, required);
+}
+
+root_type SkinrTierThresholdsTable;

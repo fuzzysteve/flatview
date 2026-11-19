@@ -1,0 +1,30 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.dungeons;
+
+table Dungeons {
+  dungeonID: int (id: 0, key);
+  allowedShipsList: [int] (id: 1, required);
+  archetypeID: int (id: 2);
+  description: Localized (id: 3);
+  factionID: int = null (id: 4);
+  gameplayDescription: Localized (id: 5);
+  name: Localized (id: 6, required);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table DungeonsTable {
+  rows: [Dungeons] (id: 0, required);
+}
+
+root_type DungeonsTable;

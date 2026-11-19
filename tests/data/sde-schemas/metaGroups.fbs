@@ -1,0 +1,35 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.metaGroups;
+
+table MetaGroups {
+  metaGroupID: int (id: 0, key);
+  color: MetaGroupsColor (id: 1);
+  description: Localized (id: 2);
+  iconID: int = null (id: 3);
+  iconSuffix: string (id: 4);
+  name: Localized (id: 5, required);
+}
+
+table MetaGroupsColor {
+  r: double (id: 0);
+  g: double (id: 1);
+  b: double (id: 2);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table MetaGroupsTable {
+  rows: [MetaGroups] (id: 0, required);
+}
+
+root_type MetaGroupsTable;

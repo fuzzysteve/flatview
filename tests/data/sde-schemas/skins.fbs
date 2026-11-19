@@ -1,0 +1,20 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.skins;
+
+table Skins {
+  skinID: int (id: 0, key);
+  allowCCPDevs: bool (id: 1);
+  internalName: string (id: 2, required);
+  isStructureSkin: bool = null (id: 3);
+  skinMaterialID: int (id: 4);
+  types: [int] (id: 5, required);
+  visibleSerenity: bool (id: 6);
+  visibleTranquility: bool (id: 7);
+}
+
+table SkinsTable {
+  rows: [Skins] (id: 0, required);
+}
+
+root_type SkinsTable;

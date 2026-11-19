@@ -1,0 +1,23 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.mapSecondarySuns;
+
+table MapSecondarySuns {
+  sunID: int (id: 0, key);
+  effectBeaconTypeID: int (id: 1);
+  position: MapSecondarySunsPosition (id: 2, required);
+  solarSystemID: int (id: 3);
+  typeID: int (id: 4);
+}
+
+table MapSecondarySunsPosition {
+  x: double (id: 0);
+  y: double (id: 1);
+  z: double (id: 2);
+}
+
+table MapSecondarySunsTable {
+  rows: [MapSecondarySuns] (id: 0, required);
+}
+
+root_type MapSecondarySunsTable;

@@ -1,0 +1,54 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.mapAsteroidBelts;
+
+table MapAsteroidBelts {
+  asteroidBeltID: int (id: 0, key);
+  celestialIndex: int (id: 1);
+  uniqueName: Localized (id: 2);
+  orbitID: int (id: 3);
+  orbitIndex: int (id: 4);
+  position: MapAsteroidBeltsPosition (id: 5, required);
+  radius: double = null (id: 6);
+  solarSystemID: int (id: 7);
+  statistics: MapAsteroidBeltsStatistics (id: 8);
+  typeID: int (id: 9);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table MapAsteroidBeltsPosition {
+  x: double (id: 0);
+  y: double (id: 1);
+  z: double (id: 2);
+}
+
+table MapAsteroidBeltsStatistics {
+  density: double (id: 0);
+  eccentricity: double (id: 1);
+  escapeVelocity: double (id: 2);
+  locked: bool (id: 3);
+  massDust: double (id: 4);
+  massGas: double = null (id: 5);
+  orbitPeriod: double (id: 6);
+  orbitRadius: double (id: 7);
+  rotationRate: double (id: 8);
+  spectralClass: string (id: 9, required);
+  surfaceGravity: double (id: 10);
+  temperature: double (id: 11);
+}
+
+table MapAsteroidBeltsTable {
+  rows: [MapAsteroidBelts] (id: 0, required);
+}
+
+root_type MapAsteroidBeltsTable;

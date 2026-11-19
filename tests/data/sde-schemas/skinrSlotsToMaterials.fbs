@@ -1,0 +1,22 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.skinrSlotsToMaterials;
+
+table SkinrSlotsToMaterials {
+  factionID: int (id: 0, key);
+  slots: [SkinrSlotsToMaterialsSlots] (id: 1, required, sde_value);
+}
+
+table SkinrSlotsToMaterialsSlots {
+  materialID: int (id: 0);
+  slotID: int (id: 1);
+}
+
+table SkinrSlotsToMaterialsTable {
+  rows: [SkinrSlotsToMaterials] (id: 0, required);
+}
+
+root_type SkinrSlotsToMaterialsTable;

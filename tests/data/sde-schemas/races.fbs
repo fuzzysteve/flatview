@@ -1,0 +1,37 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.races;
+
+table Races {
+  raceID: int (id: 0, key);
+  description: Localized (id: 1);
+  iconID: int = null (id: 2);
+  name: Localized (id: 3, required);
+  shipTypeID: int = null (id: 4);
+  skills: [RacesSkills] (id: 5);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table RacesSkills {
+  typeID: int (id: 0, key);
+  level: int (id: 1, sde_value);
+}
+
+table RacesTable {
+  rows: [Races] (id: 0, required);
+}
+
+root_type RacesTable;

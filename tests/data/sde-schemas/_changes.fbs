@@ -1,0 +1,31 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde._changes;
+
+table _changes {
+  comparedWith: string (id: 0, key, required);
+  tables: [Table] (id: 1, required);
+}
+
+table Table {
+  table: string (id: 0, key, required);
+  added: Keys (id: 1);
+  removed: Keys (id: 2);
+  changed: Keys (id: 3);
+  changedLocalization: Keys (id: 4);
+  fileAdded: bool = null (id: 5);
+  fileRemoved: bool = null (id: 6);
+  fileRenamed: bool = null (id: 7);
+  schemaChanged: bool = null (id: 8);
+}
+
+table Keys {
+  ints: [long] (id: 0, required);
+  strings: [string] (id: 1, required);
+}
+
+table _changesTable {
+  rows: [_changes] (id: 0, required);
+}
+
+root_type _changesTable;

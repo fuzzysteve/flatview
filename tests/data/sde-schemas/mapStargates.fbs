@@ -1,0 +1,28 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.mapStargates;
+
+table MapStargates {
+  stargateID: int (id: 0, key);
+  destination: MapStargatesDestination (id: 1, required);
+  position: MapStargatesPosition (id: 2, required);
+  solarSystemID: int (id: 3);
+  typeID: int (id: 4);
+}
+
+table MapStargatesDestination {
+  solarSystemID: int (id: 0);
+  stargateID: int (id: 1);
+}
+
+table MapStargatesPosition {
+  x: double (id: 0);
+  y: double (id: 1);
+  z: double (id: 2);
+}
+
+table MapStargatesTable {
+  rows: [MapStargates] (id: 0, required);
+}
+
+root_type MapStargatesTable;

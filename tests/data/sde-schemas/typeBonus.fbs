@@ -1,0 +1,51 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.typeBonus;
+
+table TypeBonus {
+  typeID: int (id: 0, key);
+  iconID: int = null (id: 1);
+  miscBonuses: [TypeBonusMiscBonuses] (id: 2);
+  roleBonuses: [Bonus] (id: 3);
+  types: [TypeBonusTypes] (id: 4);
+}
+
+table TypeBonusMiscBonuses {
+  bonus: double = null (id: 0);
+  bonusText: Localized (id: 1, required);
+  importance: int (id: 2);
+  isPositive: bool = null (id: 3);
+  unitID: int = null (id: 4);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table Bonus {
+  bonus: double = null (id: 0);
+  bonusText: Localized (id: 1, required);
+  importance: int (id: 2);
+  unitID: int = null (id: 3);
+}
+
+table TypeBonusTypes {
+  typeID: int (id: 0, key);
+  bonuses: [Bonus] (id: 1, required, sde_value);
+}
+
+table TypeBonusTable {
+  rows: [TypeBonus] (id: 0, required);
+}
+
+root_type TypeBonusTable;

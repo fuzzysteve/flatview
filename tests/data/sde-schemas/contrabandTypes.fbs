@@ -1,0 +1,22 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.contrabandTypes;
+
+table ContrabandTypes {
+  typeID: int (id: 0, key);
+  factions: [ContrabandTypesFactions] (id: 1, required);
+}
+
+table ContrabandTypesFactions {
+  factionID: int (id: 0, key);
+  attackMinSec: double (id: 1);
+  confiscateMinSec: double (id: 2);
+  fineByValue: double (id: 3);
+  standingLoss: double (id: 4);
+}
+
+table ContrabandTypesTable {
+  rows: [ContrabandTypes] (id: 0, required);
+}
+
+root_type ContrabandTypesTable;

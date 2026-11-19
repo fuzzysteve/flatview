@@ -1,0 +1,65 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.blueprints;
+
+table Blueprints {
+  blueprintTypeID: int (id: 0, key);
+  activities: BlueprintsActivities (id: 1, required);
+  maxProductionLimit: int (id: 2);
+}
+
+table BlueprintsActivities {
+  copying: Activity (id: 0);
+  invention: InventionActivity (id: 1);
+  manufacturing: ProductionActivity (id: 2);
+  reaction: ProductionActivity (id: 3);
+  research_material: Activity (id: 4);
+  research_time: Activity (id: 5);
+}
+
+table Activity {
+  materials: [Material] (id: 0);
+  skills: [Skill] (id: 1);
+  time: int (id: 2);
+}
+
+table Material {
+  quantity: int (id: 0);
+  typeID: int (id: 1);
+}
+
+table Skill {
+  level: int (id: 0);
+  typeID: int (id: 1);
+}
+
+table InventionActivity {
+  materials: [Material] (id: 0);
+  products: [InventionProduct] (id: 1);
+  skills: [Skill] (id: 2);
+  time: int (id: 3);
+}
+
+table InventionProduct {
+  probability: double = null (id: 0);
+  quantity: int (id: 1);
+  typeID: int (id: 2);
+}
+
+table ProductionActivity {
+  materials: [Material] (id: 0);
+  products: [Product] (id: 1);
+  skills: [Skill] (id: 2);
+  time: int (id: 3);
+}
+
+table Product {
+  quantity: int (id: 0);
+  typeID: int (id: 1);
+}
+
+table BlueprintsTable {
+  rows: [Blueprints] (id: 0, required);
+}
+
+root_type BlueprintsTable;

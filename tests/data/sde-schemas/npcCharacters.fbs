@@ -1,0 +1,51 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.npcCharacters;
+
+table NpcCharacters {
+  characterID: int (id: 0, key);
+  agent: NpcCharactersAgent (id: 1);
+  ancestryID: int = null (id: 2);
+  bloodlineID: int (id: 3);
+  careerID: int = null (id: 4);
+  ceo: bool (id: 5);
+  corporationID: int (id: 6);
+  description: string (id: 7);
+  locationID: int = null (id: 8);
+  raceID: int (id: 9);
+  schoolID: int = null (id: 10);
+  specialityID: int = null (id: 11);
+  gender: bool (id: 12);
+  name: Localized (id: 13, required);
+  skills: [NpcCharactersSkills] (id: 14);
+  startDate: string (id: 15);
+  uniqueName: bool (id: 16);
+}
+
+table NpcCharactersAgent {
+  agentTypeID: int (id: 0);
+  divisionID: int (id: 1);
+  isLocator: bool (id: 2);
+  level: int (id: 3);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table NpcCharactersSkills {
+  typeID: int (id: 0);
+}
+
+table NpcCharactersTable {
+  rows: [NpcCharacters] (id: 0, required);
+}
+
+root_type NpcCharactersTable;

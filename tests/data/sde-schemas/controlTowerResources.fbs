@@ -1,0 +1,22 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.controlTowerResources;
+
+table ControlTowerResources {
+  typeID: int (id: 0, key);
+  resources: [ControlTowerResourcesResources] (id: 1, required);
+}
+
+table ControlTowerResourcesResources {
+  factionID: int = null (id: 0);
+  minSecurityLevel: double = null (id: 1);
+  purpose: int (id: 2);
+  quantity: int (id: 3);
+  resourceTypeID: int (id: 4);
+}
+
+table ControlTowerResourcesTable {
+  rows: [ControlTowerResources] (id: 0, required);
+}
+
+root_type ControlTowerResourcesTable;

@@ -1,0 +1,107 @@
+namespace reflection;
+
+enum BaseType : byte {
+    None, UType, Bool, Byte, UByte, Short, UShort, Int, UInt, Long, ULong,
+    Float, Double, String, Vector, Obj, Union, Array, Vector64, MaxBaseType
+}
+
+enum AdvancedFeatures : ulong (bit_flags) {
+    AdvancedArrayFeatures, AdvancedUnionFeatures, OptionalScalars, DefaultVectorsAndStrings,
+}
+
+table Type {
+    base_type:BaseType;
+    element:BaseType = None;
+    index:int = -1;
+    fixed_length:uint16 = 0;
+    base_size:uint = 4;
+    element_size:uint = 0;
+}
+
+table KeyValue {
+    key:string (required, key);
+    value:string;
+}
+
+table EnumVal {
+    name:string (required);
+    value:long (key);
+    object:Object (deprecated);
+    union_type:Type;
+    documentation:[string];
+    attributes:[KeyValue];
+}
+
+table Enum {
+    name:string (required, key);
+    values:[EnumVal] (required);
+    is_union:bool = false;
+    underlying_type:Type (required);
+    attributes:[KeyValue];
+    documentation:[string];
+    declaration_file: string;
+}
+
+table Field {
+    name:string (required, key);
+    type:Type (required);
+    id:ushort;
+    offset:ushort;
+    default_integer:long = 0;
+    default_real:double = 0.0;
+    deprecated:bool = false;
+    required:bool = false;
+    key:bool = false;
+    attributes:[KeyValue];
+    documentation:[string];
+    optional:bool = false;
+    padding:uint16 = 0;
+    offset64:bool = false;
+}
+
+table Object {
+    name:string (required, key);
+    fields:[Field] (required);
+    is_struct:bool = false;
+    minalign:int;
+    bytesize:int;
+    attributes:[KeyValue];
+    documentation:[string];
+    declaration_file: string;
+}
+
+table RPCCall {
+    name:string (required, key);
+    request:Object (required);
+    response:Object (required);
+    attributes:[KeyValue];
+    documentation:[string];
+}
+
+table Service {
+    name:string (required, key);
+    calls:[RPCCall];
+    attributes:[KeyValue];
+    documentation:[string];
+    declaration_file: string;
+}
+
+table SchemaFile {
+  filename:string (required, key);
+  included_filenames:[string];
+}
+
+table Schema {
+    objects:[Object] (required);
+    enums:[Enum] (required);
+    file_ident:string;
+    file_ext:string;
+    root_table:Object;
+    services:[Service];
+    advanced_features:AdvancedFeatures;
+    fbs_files:[SchemaFile];
+}
+
+root_type Schema;
+file_identifier "BFBS";
+file_extension "bfbs";

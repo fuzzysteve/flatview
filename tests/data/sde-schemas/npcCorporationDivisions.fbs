@@ -1,0 +1,29 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.npcCorporationDivisions;
+
+table NpcCorporationDivisions {
+  divisionID: int (id: 0, key);
+  description: Localized (id: 1);
+  displayName: string (id: 2);
+  internalName: string (id: 3, required);
+  leaderTypeName: Localized (id: 4, required);
+  name: Localized (id: 5, required);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table NpcCorporationDivisionsTable {
+  rows: [NpcCorporationDivisions] (id: 0, required);
+}
+
+root_type NpcCorporationDivisionsTable;

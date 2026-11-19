@@ -1,0 +1,65 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.mapPlanets;
+
+table MapPlanets {
+  planetID: int (id: 0, key);
+  asteroidBeltIDs: [int] (id: 1);
+  attributes: MapPlanetsAttributes (id: 2, required);
+  celestialIndex: int (id: 3);
+  moonIDs: [int] (id: 4);
+  uniqueName: Localized (id: 5);
+  npcStationIDs: [int] (id: 6);
+  orbitID: int (id: 7);
+  position: MapPlanetsPosition (id: 8, required);
+  radius: long (id: 9);
+  solarSystemID: int (id: 10);
+  statistics: MapPlanetsStatistics (id: 11, required);
+  typeID: int (id: 12);
+}
+
+table MapPlanetsAttributes {
+  heightMap1: int (id: 0);
+  heightMap2: int (id: 1);
+  population: bool (id: 2);
+  shaderPreset: int (id: 3);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table MapPlanetsPosition {
+  x: double (id: 0);
+  y: double (id: 1);
+  z: double (id: 2);
+}
+
+table MapPlanetsStatistics {
+  density: double (id: 0);
+  eccentricity: double (id: 1);
+  escapeVelocity: double (id: 2);
+  locked: bool (id: 3);
+  massDust: double (id: 4);
+  massGas: double = null (id: 5);
+  orbitPeriod: double = null (id: 6);
+  orbitRadius: double = null (id: 7);
+  pressure: double (id: 8);
+  rotationRate: double (id: 9);
+  spectralClass: string (id: 10, required);
+  surfaceGravity: double = null (id: 11);
+  temperature: double (id: 12);
+}
+
+table MapPlanetsTable {
+  rows: [MapPlanets] (id: 0, required);
+}
+
+root_type MapPlanetsTable;

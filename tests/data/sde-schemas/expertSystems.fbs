@@ -1,0 +1,24 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.expertSystems;
+
+table ExpertSystems {
+  typeID: int (id: 0, key);
+  associatedShipTypes: [int] (id: 1);
+  durationDays: int (id: 2);
+  hidden: bool (id: 3);
+  internalName: string (id: 4, required);
+  retired: bool (id: 5);
+  skillsGranted: [ExpertSystemsSkillsGranted] (id: 6, required);
+}
+
+table ExpertSystemsSkillsGranted {
+  typeID: int (id: 0);
+  level: int (id: 1);
+}
+
+table ExpertSystemsTable {
+  rows: [ExpertSystems] (id: 0, required);
+}
+
+root_type ExpertSystemsTable;

@@ -1,0 +1,17 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.agentsInSpace;
+
+table AgentsInSpace {
+  agentID: int (id: 0, key);
+  dungeonID: int (id: 1);
+  solarSystemID: int (id: 2);
+  spawnPointID: int (id: 3);
+  typeID: int (id: 4);
+}
+
+table AgentsInSpaceTable {
+  rows: [AgentsInSpace] (id: 0, required);
+}
+
+root_type AgentsInSpaceTable;

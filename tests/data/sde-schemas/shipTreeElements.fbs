@@ -1,0 +1,27 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.shipTreeElements;
+
+table ShipTreeElements {
+  elementID: int (id: 0, key);
+  description: Localized (id: 1, required);
+  icon: string (id: 2, required);
+  name: Localized (id: 3, required);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table ShipTreeElementsTable {
+  rows: [ShipTreeElements] (id: 0, required);
+}
+
+root_type ShipTreeElementsTable;

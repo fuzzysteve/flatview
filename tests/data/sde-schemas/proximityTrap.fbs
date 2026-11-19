@@ -1,0 +1,29 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.proximityTrap;
+
+table ProximityTrap {
+  typeID: int (id: 0, key);
+  dbuffDuration: int = null (id: 1);
+  dbuffs: [ProximityTrapDbuffs] (id: 2);
+  forceDecloakDuration: int = null (id: 3);
+  resetDelay: int = null (id: 4);
+  showPerimeterLights: bool = null (id: 5);
+  triggerDelay: int = null (id: 6);
+  triggerFilterTypeListID: int = null (id: 7);
+  triggerRange: int = null (id: 8);
+}
+
+table ProximityTrapDbuffs {
+  dbuffID: int (id: 0, key);
+  value: double (id: 1, sde_value);
+}
+
+table ProximityTrapTable {
+  rows: [ProximityTrap] (id: 0, required);
+}
+
+root_type ProximityTrapTable;

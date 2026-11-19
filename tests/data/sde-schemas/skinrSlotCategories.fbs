@@ -1,0 +1,14 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.skinrSlotCategories;
+
+table SkinrSlotCategories {
+  categoryID: int (id: 0, key);
+  name: string (id: 1, required);
+}
+
+table SkinrSlotCategoriesTable {
+  rows: [SkinrSlotCategories] (id: 0, required);
+}
+
+root_type SkinrSlotCategoriesTable;

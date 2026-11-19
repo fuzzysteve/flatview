@@ -1,0 +1,51 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.shipTreeGroups;
+
+table ShipTreeGroups {
+  groupID: int (id: 0, key);
+  description: Localized (id: 1);
+  elements: [ShipTreeGroupsElements] (id: 2, required);
+  icon: string (id: 3, required);
+  iconLarge: string (id: 4, required);
+  iconSmall: string (id: 5, required);
+  iconSmallNPC: string (id: 6, required);
+  name: Localized (id: 7, required);
+  preReqSkills: [ShipTreeGroupsPreReqSkills] (id: 8, required);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table ShipTreeGroupsElements {
+  position: int (id: 0, key);
+  elementID: int (id: 1, sde_value);
+}
+
+table ShipTreeGroupsPreReqSkills {
+  factionID: int (id: 0, key);
+  skills: [ShipTreeGroupsPreReqSkillsSkills] (id: 1, required);
+}
+
+table ShipTreeGroupsPreReqSkillsSkills {
+  skillTypeID: int (id: 0, key);
+  display: bool (id: 1);
+  level: int (id: 2);
+}
+
+table ShipTreeGroupsTable {
+  rows: [ShipTreeGroups] (id: 0, required);
+}
+
+root_type ShipTreeGroupsTable;

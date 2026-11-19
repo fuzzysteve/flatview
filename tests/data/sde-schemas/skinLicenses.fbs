@@ -1,0 +1,16 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.skinLicenses;
+
+table SkinLicenses {
+  licenseTypeID: int (id: 0, key);
+  duration: int (id: 1);
+  isSingleUse: bool = null (id: 2);
+  skinID: int (id: 3);
+}
+
+table SkinLicensesTable {
+  rows: [SkinLicenses] (id: 0, required);
+}
+
+root_type SkinLicensesTable;

@@ -1,0 +1,117 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+// In the JSONL, this enum is written as the name of its value, not its number.
+attribute "sde_enum_name";
+
+// The name of this enum value, which is not a valid flatbuffers name.
+attribute "sde_name";
+
+namespace sde.missions;
+
+enum MessageKind: int {
+  messages_mission_failed_agentsays = 0 (sde_name: "messages.mission.failed.agentsays"),
+  messages_mission_decline_charsays = 1 (sde_name: "messages.mission.decline.charsays"),
+  messages_mission_briefing = 2 (sde_name: "messages.mission.briefing"),
+  messages_mission_extrainfo_body = 3 (sde_name: "messages.mission.extrainfo.body"),
+  messages_mission_completed_nextmission_agentsays = 4 (sde_name: "messages.mission.completed.nextmission.agentsays"),
+  messages_mission_timeout_emailheader = 5 (sde_name: "messages.mission.timeout.emailheader"),
+  messages_mission_completed_agentsays = 6 (sde_name: "messages.mission.completed.agentsays"),
+  messages_mission_declined_agentsays = 7 (sde_name: "messages.mission.declined.agentsays"),
+  messages_mission_timeout_emailbody = 8 (sde_name: "messages.mission.timeout.emailbody"),
+  messages_mission_extrainfo_header = 9 (sde_name: "messages.mission.extrainfo.header"),
+  messages_mission_offered_agentsays = 10 (sde_name: "messages.mission.offered.agentsays"),
+  messages_mission_quitted_agentsays = 11 (sde_name: "messages.mission.quitted.agentsays"),
+  messages_mission_complete_charsays = 12 (sde_name: "messages.mission.complete.charsays"),
+  messages_mission_option2_chyarsays = 13 (sde_name: "messages.mission.option2.chyarsays"),
+  messages_mission_accept_charsays = 14 (sde_name: "messages.mission.accept.charsays"),
+  messages_root_agentsays = 15 (sde_name: "messages.root.agentsays"),
+  messages_mission_accepted_agentsays = 16 (sde_name: "messages.mission.accepted.agentsays"),
+  messages_mission_offerexpired_email_body = 17 (sde_name: "messages.mission.offerexpired.email.body"),
+  messages_mission_quit_charsays = 18 (sde_name: "messages.mission.quit.charsays"),
+  messages_mission_ask_charsays = 19 (sde_name: "messages.mission.ask.charsays"),
+  messages_mission_offerexpired_email_header = 20 (sde_name: "messages.mission.offerexpired.email.header"),
+  messages_epicMission_journalText_chapterTitle = 21 (sde_name: "messages.epicMission.journalText.chapterTitle"),
+  messages_epicMission_journalText_completedMessage = 22 (sde_name: "messages.epicMission.journalText.completedMessage"),
+  messages_epicMission_journalText_inProgressMessage = 23 (sde_name: "messages.epicMission.journalText.inProgressMessage"),
+  messages_root_missioninprogress_agentsays = 24 (sde_name: "messages.root.missioninprogress.agentsays"),
+  messages_mission_option1_charsays = 25 (sde_name: "messages.mission.option1.charsays"),
+  messages_mission_option2_charsays = 26 (sde_name: "messages.mission.option2.charsays"),
+  messages_mission_option3_charsays = 27 (sde_name: "messages.mission.option3.charsays"),
+  messages_mission_option4_charsays = 28 (sde_name: "messages.mission.option4.charsays"),
+}
+
+table Missions {
+  missionID: int (id: 0, key);
+  agentTypeID: int = null (id: 1);
+  corporationID: int = null (id: 2);
+  courierMission: MissionsCourierMission (id: 3);
+  expirationTime: int = null (id: 4);
+  extraStandings: [MissionsExtraStandings] (id: 5);
+  factionID: int = null (id: 6);
+  hasStandingRewards: bool = null (id: 7);
+  initialAgentGiftQuantity: int = null (id: 8);
+  initialAgentGiftTypeID: int = null (id: 9);
+  killMission: MissionsKillMission (id: 10);
+  messages: [MissionsMessages] (id: 11);
+  missionRewards: MissionsMissionRewards (id: 12);
+  name: Localized (id: 13, required);
+}
+
+table MissionsCourierMission {
+  objectiveQuantity: int = null (id: 0);
+  objectiveSingleton: bool = null (id: 1);
+  objectiveTypeID: int (id: 2);
+}
+
+table MissionsExtraStandings {
+  factionID: int (id: 0, key);
+  standing: double (id: 1, sde_value);
+}
+
+table MissionsKillMission {
+  dropItemInMissionContainer: int = null (id: 0);
+  dungeonID: int = null (id: 1);
+  objectiveQuantity: int = null (id: 2);
+  objectiveTypeID: int = null (id: 3);
+}
+
+table MissionsMessages {
+  kind: MessageKind (id: 0, key, sde_enum_name);
+  text: Localized (id: 1, required, sde_value);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table MissionsMissionRewards {
+  bonusReward: MissionsMissionRewardsBonusReward (id: 0);
+  bonusTimeInterval: int = null (id: 1);
+  reward: MissionsMissionRewardsReward (id: 2);
+}
+
+table MissionsMissionRewardsBonusReward {
+  rewardQuantity: int = null (id: 0);
+  rewardTypeID: int = null (id: 1);
+}
+
+table MissionsMissionRewardsReward {
+  rewardQuantity: int = null (id: 0);
+  rewardTypeID: int = null (id: 1);
+}
+
+table MissionsTable {
+  rows: [Missions] (id: 0, required);
+}
+
+root_type MissionsTable;

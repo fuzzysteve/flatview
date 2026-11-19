@@ -1,0 +1,24 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.systemWideEffects;
+
+table SystemWideEffects {
+  typeID: int (id: 0, key);
+  dbuffs: [SystemWideEffectsDbuffs] (id: 1);
+  eligibleTypeListID: int = null (id: 2);
+  environmentTypeID: int = null (id: 3);
+}
+
+table SystemWideEffectsDbuffs {
+  dbuffID: int (id: 0, key);
+  value: double (id: 1, sde_value);
+}
+
+table SystemWideEffectsTable {
+  rows: [SystemWideEffects] (id: 0, required);
+}
+
+root_type SystemWideEffectsTable;

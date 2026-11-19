@@ -1,0 +1,36 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.factions;
+
+table Factions {
+  factionID: int (id: 0, key);
+  corporationID: int = null (id: 1);
+  description: Localized (id: 2);
+  flatLogo: string (id: 3);
+  flatLogoWithName: string (id: 4);
+  iconID: int (id: 5);
+  memberRaces: [int] (id: 6, required);
+  militiaCorporationID: int = null (id: 7);
+  name: Localized (id: 8, required);
+  shortDescription: Localized (id: 9);
+  sizeFactor: double (id: 10);
+  solarSystemID: int (id: 11);
+  uniqueName: bool (id: 12);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table FactionsTable {
+  rows: [Factions] (id: 0, required);
+}
+
+root_type FactionsTable;

@@ -1,0 +1,28 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde._schemaChangelog;
+
+table _schemaChangelog {
+  afterBuildNumber: long (id: 0, key);
+  date: string (id: 1, required);
+  tables: [ChangedTable] (id: 2, required);
+}
+
+table ChangedTable {
+  table: string (id: 0, key, required);
+  change: string (id: 1);
+  renamedFrom: string (id: 2);
+  fields: [ChangedField] (id: 3, required);
+}
+
+table ChangedField {
+  field: string (id: 0, key, required);
+  change: string (id: 1);
+  renamedFrom: string (id: 2);
+}
+
+table _schemaChangelogTable {
+  rows: [_schemaChangelog] (id: 0, required);
+}
+
+root_type _schemaChangelogTable;

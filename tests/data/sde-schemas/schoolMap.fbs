@@ -1,0 +1,15 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.schoolMap;
+
+table SchoolMap {
+  schoolMapID: int (id: 0, key);
+  schoolID: int (id: 1);
+  solarSystemID: int (id: 2);
+}
+
+table SchoolMapTable {
+  rows: [SchoolMap] (id: 0, required);
+}
+
+root_type SchoolMapTable;

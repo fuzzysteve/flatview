@@ -1,0 +1,20 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.cloneGrades;
+
+table CloneGrades {
+  cloneGradeID: int (id: 0, key);
+  name: string (id: 1, required);
+  skills: [CloneGradesSkills] (id: 2, required);
+}
+
+table CloneGradesSkills {
+  typeID: int (id: 0);
+  level: int (id: 1);
+}
+
+table CloneGradesTable {
+  rows: [CloneGrades] (id: 0, required);
+}
+
+root_type CloneGradesTable;

@@ -1,0 +1,22 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.masteries;
+
+table Masteries {
+  typeID: int (id: 0, key);
+  levels: [MasteriesLevels] (id: 1, required, sde_value);
+}
+
+table MasteriesLevels {
+  level: int (id: 0, key);
+  certificateIDs: [int] (id: 1, required, sde_value);
+}
+
+table MasteriesTable {
+  rows: [Masteries] (id: 0, required);
+}
+
+root_type MasteriesTable;

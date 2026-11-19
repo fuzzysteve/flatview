@@ -1,0 +1,58 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.dogmaAttributes;
+
+enum DataType: int {
+  instanceBoolean = 0,
+  instanceInteger = 1,
+  instanceFloat = 2,
+  typeBoolean = 3,
+  typeInteger = 4,
+  typeFloat = 5,
+  instanceFloatCharge = 6,
+  typeHex = 7,
+  typeDamage = 8,
+  typeMirror = 9,
+  typeAttributeId = 10,
+  typeTypeId = 11,
+  typeGroupId = 12,
+  typeTypeListId = 13,
+}
+
+table DogmaAttributes {
+  attributeID: int (id: 0, key);
+  attributeCategoryID: int = null (id: 1);
+  chargeRechargeTimeID: int = null (id: 2);
+  dataType: DataType (id: 3);
+  defaultValue: double (id: 4);
+  description: string (id: 5);
+  displayName: Localized (id: 6);
+  displayWhenZero: bool = null (id: 7);
+  highIsGood: bool (id: 8);
+  iconID: int = null (id: 9);
+  maxAttributeID: int = null (id: 10);
+  minAttributeID: int = null (id: 11);
+  name: string (id: 12, required);
+  published: bool (id: 13);
+  stackable: bool (id: 14);
+  tooltipDescription: Localized (id: 15);
+  tooltipTitle: Localized (id: 16);
+  unitID: int = null (id: 17);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table DogmaAttributesTable {
+  rows: [DogmaAttributes] (id: 0, required);
+}
+
+root_type DogmaAttributesTable;

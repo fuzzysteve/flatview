@@ -1,0 +1,25 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.typeDogma;
+
+table TypeDogma {
+  typeID: int (id: 0, key);
+  dogmaAttributes: [TypeDogmaDogmaAttributes] (id: 1, required);
+  dogmaEffects: [TypeDogmaDogmaEffects] (id: 2, required);
+}
+
+table TypeDogmaDogmaAttributes {
+  attributeID: int (id: 0);
+  value: double (id: 1);
+}
+
+table TypeDogmaDogmaEffects {
+  effectID: int (id: 0);
+  isDefault: bool (id: 1);
+}
+
+table TypeDogmaTable {
+  rows: [TypeDogma] (id: 0, required);
+}
+
+root_type TypeDogmaTable;

@@ -1,0 +1,14 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.icons;
+
+table Icons {
+  iconID: int (id: 0, key);
+  iconFile: string (id: 1);
+}
+
+table IconsTable {
+  rows: [Icons] (id: 0, required);
+}
+
+root_type IconsTable;

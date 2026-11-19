@@ -1,0 +1,113 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// In the JSONL, this enum is written as the name of its value, not its number.
+attribute "sde_enum_name";
+
+namespace sde.dogmaEffects;
+
+enum Distribution: int {
+  local = 0,
+  twosome = 1,
+  bubble = 2,
+  systemWide = 3,
+}
+
+enum EffectCategory: int {
+  passive = 0,
+  activation = 1,
+  target = 2,
+  area = 3,
+  online = 4,
+  overload = 5,
+  dungeon = 6,
+  system = 7,
+}
+
+enum Domain: int {
+  shipID = 0,
+  charID = 1,
+  targetID = 2,
+  otherID = 3,
+  structureID = 4,
+  itemID = 5,
+  target = 6,
+}
+
+enum Func: int {
+  ItemModifier = 0,
+  LocationRequiredSkillModifier = 1,
+  OwnerRequiredSkillModifier = 2,
+  LocationModifier = 3,
+  LocationGroupModifier = 4,
+  EffectStopper = 5,
+}
+
+enum Operation: int {
+  preAssignment = -1,
+  preMul = 0,
+  preDiv = 1,
+  modAdd = 2,
+  modSub = 3,
+  postMul = 4,
+  postDiv = 5,
+  postPercent = 6,
+  postAssignment = 7,
+  specialSkillOp = 9,
+}
+
+table DogmaEffects {
+  effectID: int (id: 0, key);
+  description: Localized (id: 1);
+  disallowAutoRepeat: bool (id: 2);
+  dischargeAttributeID: int = null (id: 3);
+  displayName: Localized (id: 4);
+  distribution: Distribution = null (id: 5);
+  durationAttributeID: int = null (id: 6);
+  effectCategoryID: EffectCategory (id: 7);
+  electronicChance: bool (id: 8);
+  falloffAttributeID: int = null (id: 9);
+  fittingUsageChanceAttributeID: int = null (id: 10);
+  guid: string (id: 11);
+  iconID: int = null (id: 12);
+  isAssistance: bool (id: 13);
+  isOffensive: bool (id: 14);
+  isWarpSafe: bool (id: 15);
+  modifierInfo: [DogmaEffectsModifierInfo] (id: 16);
+  name: string (id: 17, required);
+  npcActivationChanceAttributeID: int = null (id: 18);
+  npcUsageChanceAttributeID: int = null (id: 19);
+  propulsionChance: bool (id: 20);
+  published: bool (id: 21);
+  rangeAttributeID: int = null (id: 22);
+  rangeChance: bool (id: 23);
+  resistanceAttributeID: int = null (id: 24);
+  trackingSpeedAttributeID: int = null (id: 25);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table DogmaEffectsModifierInfo {
+  domain: Domain (id: 0, sde_enum_name);
+  effectID: int = null (id: 1);
+  func: Func (id: 2, sde_enum_name);
+  groupID: int = null (id: 3);
+  modifiedAttributeID: int = null (id: 4);
+  modifyingAttributeID: int = null (id: 5);
+  operation: Operation = null (id: 6);
+  skillTypeID: int = null (id: 7);
+}
+
+table DogmaEffectsTable {
+  rows: [DogmaEffects] (id: 0, required);
+}
+
+root_type DogmaEffectsTable;

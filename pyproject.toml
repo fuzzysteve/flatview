@@ -1,0 +1,32 @@
+[project]
+name = "flatview"
+version = "0.1.0"
+description = "Schema-driven FlatBuffers for Python: read .fbs/.bfbs at runtime, lazy pythonic views, key lookup, verification and encoding — no code generation."
+readme = "README.md"
+authors = [
+    { name = "Fuzzysteve", email = "steve@fuzzysteve.co.uk" }
+]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+flatview = "flatview.__main__:main"
+
+[dependency-groups]
+bench = [
+    "flatbuffers>=25.12.19",
+]
+dev = [
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "sde_full: needs the full SDE example set (run scripts/fetch_sde_examples.py)",
+    "flatc: needs the flatc compiler on PATH",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.9,<0.14.0"]
+build-backend = "uv_build"

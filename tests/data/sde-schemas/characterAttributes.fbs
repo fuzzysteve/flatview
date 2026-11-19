@@ -1,0 +1,29 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.characterAttributes;
+
+table CharacterAttributes {
+  attributeID: int (id: 0, key);
+  description: string (id: 1, required);
+  iconID: int (id: 2);
+  name: Localized (id: 3, required);
+  notes: string (id: 4, required);
+  shortDescription: string (id: 5, required);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table CharacterAttributesTable {
+  rows: [CharacterAttributes] (id: 0, required);
+}
+
+root_type CharacterAttributesTable;

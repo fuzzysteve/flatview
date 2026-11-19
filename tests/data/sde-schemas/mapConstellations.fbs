@@ -1,0 +1,36 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.mapConstellations;
+
+table MapConstellations {
+  constellationID: int (id: 0, key);
+  factionID: int = null (id: 1);
+  name: Localized (id: 2, required);
+  position: MapConstellationsPosition (id: 3, required);
+  regionID: int (id: 4);
+  solarSystemIDs: [int] (id: 5, required);
+  wormholeClassID: int = null (id: 6);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table MapConstellationsPosition {
+  x: double (id: 0);
+  y: double (id: 1);
+  z: double (id: 2);
+}
+
+table MapConstellationsTable {
+  rows: [MapConstellations] (id: 0, required);
+}
+
+root_type MapConstellationsTable;

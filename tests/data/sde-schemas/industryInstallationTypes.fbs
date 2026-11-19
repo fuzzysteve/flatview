@@ -1,0 +1,18 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.industryInstallationTypes;
+
+table IndustryInstallationTypes {
+  typeID: int (id: 0, key);
+  assemblyLines: [IndustryInstallationTypesAssemblyLines] (id: 1, required);
+}
+
+table IndustryInstallationTypesAssemblyLines {
+  assemblyLineID: int (id: 0);
+}
+
+table IndustryInstallationTypesTable {
+  rows: [IndustryInstallationTypes] (id: 0, required);
+}
+
+root_type IndustryInstallationTypesTable;

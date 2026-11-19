@@ -1,0 +1,38 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.certificates;
+
+table Certificates {
+  certificateID: int (id: 0, key);
+  description: Localized (id: 1, required);
+  groupID: int (id: 2);
+  name: Localized (id: 3, required);
+  recommendedFor: [int] (id: 4);
+  skillTypes: [CertificatesSkillTypes] (id: 5, required);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table CertificatesSkillTypes {
+  typeID: int (id: 0, key);
+  advanced: int (id: 1);
+  basic: int (id: 2);
+  elite: int (id: 3);
+  improved: int (id: 4);
+  standard: int (id: 5);
+}
+
+table CertificatesTable {
+  rows: [Certificates] (id: 0, required);
+}
+
+root_type CertificatesTable;

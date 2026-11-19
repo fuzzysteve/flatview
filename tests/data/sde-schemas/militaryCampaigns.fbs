@@ -1,0 +1,87 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.militaryCampaigns;
+
+table MilitaryCampaigns {
+  campaignID: string (id: 0, key, required);
+  annotations: Annotations (id: 1, required);
+  issuer: Issuer (id: 2, required);
+  subtitle: Localized (id: 3, required);
+  targetProgress: long (id: 4);
+  title: Localized (id: 5, required);
+}
+
+table Annotations {
+  achievementUUID: string (id: 44);
+  aoCampaignCardButtonImage: string (id: 0);
+  backgroundVideoLoop: string (id: 1);
+  briefingBackground: string (id: 2);
+  briefingFailureDescription: Localized (id: 3);
+  briefingFailureHeader: Localized (id: 4);
+  briefingFinalWords: Localized (id: 5);
+  briefingForeground: string (id: 6);
+  briefingGoalDescription: Localized (id: 7);
+  briefingHeader: Localized (id: 8);
+  briefingMiddleground: string (id: 9);
+  briefingSuccessDescription: Localized (id: 10);
+  briefingSuccessHeader: Localized (id: 11);
+  campaignSet: string (id: 12);
+  dashboardAmbientBackground: string (id: 13);
+  dashboardBackground: string (id: 14);
+  dashboardForeground: string (id: 15);
+  dashboardMiddleground: string (id: 16);
+  finishedCampaignEnded: Localized (id: 17);
+  finishedFailureDescription: Localized (id: 18);
+  finishedResolutionStateFailure: Localized (id: 19);
+  finishedResolutionStateSuccess: Localized (id: 20);
+  finishedSuccessDescription: Localized (id: 21);
+  foregroundVideoIntro: string (id: 22);
+  foregroundVideoLoop: string (id: 23);
+  foregroundVideoOutro: string (id: 24);
+  infoLabel: Localized (id: 45);
+  infoLabelHint: Localized (id: 46);
+  mapFocusEntityID: int = null (id: 25);
+  mapHeader: Localized (id: 26);
+  mapSection1Paragraph: Localized (id: 27);
+  mapSection1Title: Localized (id: 28);
+  mapSection2Paragraph: Localized (id: 29);
+  mapSection2Title: Localized (id: 30);
+  mapSection3Paragraph: Localized (id: 31);
+  mapSection3Title: Localized (id: 32);
+  mapSubheader: Localized (id: 33);
+  mapTitle: Localized (id: 34);
+  middlegroundVideoIntro: string (id: 35);
+  middlegroundVideoLoop: string (id: 36);
+  middlegroundVideoOutro: string (id: 37);
+  presentingCharacterName: Localized (id: 38);
+  presentingCharacterSubtitle: Localized (id: 39);
+  presentingCharacterTexturePath: string (id: 40);
+  race: string (id: 41);
+  themePack: string (id: 42);
+  towCampaignCardButtonImage: string (id: 43);
+  uiIndex: int = null (id: 47);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table Issuer {
+  allianceID: int = null (id: 0);
+  characterID: long = null (id: 1);
+  corporationID: int = null (id: 2);
+  factionID: int = null (id: 3);
+}
+
+table MilitaryCampaignsTable {
+  rows: [MilitaryCampaigns] (id: 0, required);
+}
+
+root_type MilitaryCampaignsTable;

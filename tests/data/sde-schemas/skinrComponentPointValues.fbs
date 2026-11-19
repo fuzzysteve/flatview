@@ -1,0 +1,22 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.skinrComponentPointValues;
+
+table SkinrComponentPointValues {
+  categoryID: int (id: 0, key);
+  rarities: [SkinrComponentPointValuesRarities] (id: 1, required, sde_value);
+}
+
+table SkinrComponentPointValuesRarities {
+  rarityID: int (id: 0, key);
+  points: int (id: 1, sde_value);
+}
+
+table SkinrComponentPointValuesTable {
+  rows: [SkinrComponentPointValues] (id: 0, required);
+}
+
+root_type SkinrComponentPointValuesTable;

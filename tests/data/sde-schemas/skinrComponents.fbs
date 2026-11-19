@@ -1,0 +1,54 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// In the JSONL, this enum is written as the name of its value, not its number.
+attribute "sde_enum_name";
+
+namespace sde.skinrComponents;
+
+enum Finish: int {
+  Matte = 0,
+  Gloss = 1,
+  Satin = 2,
+}
+
+table SkinrComponents {
+  componentID: int (id: 0, key);
+  associatedTypeIds: [SkinrComponentsAssociatedTypeIDs] (id: 1, required);
+  category: int (id: 2);
+  finish: Finish (id: 3, sde_enum_name);
+  iconFile: string (id: 4, required);
+  name: Localized (id: 5, required);
+  projectionTypeU: string (id: 6, required);
+  projectionTypeV: string (id: 7, required);
+  published: bool = null (id: 8);
+  rarity: int (id: 9);
+  resourceFile: string (id: 10, required);
+  sequenceBinder: SkinrComponentsSequenceBinder (id: 11, required);
+}
+
+table SkinrComponentsAssociatedTypeIDs {
+  licenseUsesGranted: int (id: 0);
+  typeID: int (id: 1);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table SkinrComponentsSequenceBinder {
+  count: int (id: 0);
+  itemTypeID: int (id: 1);
+}
+
+table SkinrComponentsTable {
+  rows: [SkinrComponents] (id: 0, required);
+}
+
+root_type SkinrComponentsTable;

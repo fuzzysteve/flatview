@@ -1,0 +1,79 @@
+// Exercises every schema feature flatview supports. Not an SDE schema.
+include "common.fbs";
+
+namespace kitchen;
+
+attribute "priority";
+
+enum Slot : byte { Low = -1, Mid, High, Rig = 10 }
+
+enum Flags : ushort (bit_flags) { Published, Repackable, Dynamic = 5 }
+
+struct Pair {
+  a: short;
+  b: long;
+}
+
+struct Box (force_align: 16) {
+  min: kitchen.common.Vec3;
+  tag: ubyte;
+  counts: [int:3];
+  pairs: [Pair:2];
+  slot: Slot;
+}
+
+table Module {
+  name: string (key);
+  slot: Slot = Mid;
+  cpu: float = 1.5;
+  flags: Flags = Published;
+}
+
+table Charge {
+  typeID: int (key);
+  volume: double = 0.01;
+}
+
+/// What can sit in a fitting slot.
+union Fitting { Module, Charge, Ammo: Charge }
+
+table Blueprint {
+  typeID: int (key);
+  runs: int = 1;
+}
+
+/// A ship.
+table Ship (priority: 3) {
+  /// the ship's type
+  typeID: uint (key, priority: 1);
+  name: string (required);
+  race: kitchen.common.Race = Minmatar;
+  mass: double = null;
+  hp: long = -1;
+  old_field: int (deprecated);
+  position: kitchen.common.Vec3;
+  bounds: Box;
+  modules: [Module];
+  tags: [string];
+  slots: [Slot];
+  raw: [ubyte];
+  points: [kitchen.common.Vec3];
+  primary: Fitting;
+  cargo: [Fitting];
+  blueprint: [ubyte] (nested_flatbuffer: "Blueprint");
+  big: ulong = 9223372036854775807;
+  tiny: byte = -128;
+  ratio: float = inf;
+  enabled: bool = true;
+  maybe: bool = null;
+}
+
+table Fleet {
+  ships: [Ship];
+  name: string;
+  by_name: [Module];
+}
+
+root_type Fleet;
+file_identifier "FLT1";
+file_extension "flt";

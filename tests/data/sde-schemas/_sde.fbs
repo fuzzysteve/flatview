@@ -1,0 +1,15 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde._sde;
+
+table _sde {
+  key: string (id: 0, key, required);
+  buildNumber: long (id: 1);
+  releaseDate: string (id: 2, required);
+}
+
+table _sdeTable {
+  rows: [_sde] (id: 0, required);
+}
+
+root_type _sdeTable;

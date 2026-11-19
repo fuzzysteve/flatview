@@ -1,0 +1,14 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.skinrComponentCategories;
+
+table SkinrComponentCategories {
+  categoryID: int (id: 0, key);
+  name: string (id: 1, required);
+}
+
+table SkinrComponentCategoriesTable {
+  rows: [SkinrComponentCategories] (id: 0, required);
+}
+
+root_type SkinrComponentCategoriesTable;

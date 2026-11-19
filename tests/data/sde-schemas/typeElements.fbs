@@ -1,0 +1,22 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+// The value that belongs to the key of this table. In the JSONL, it is written as _value.
+attribute "sde_value";
+
+namespace sde.typeElements;
+
+table TypeElements {
+  typeID: int (id: 0, key);
+  elements: [TypeElementsElements] (id: 1, required);
+}
+
+table TypeElementsElements {
+  position: int (id: 0, key);
+  elementID: int (id: 1, sde_value);
+}
+
+table TypeElementsTable {
+  rows: [TypeElements] (id: 0, required);
+}
+
+root_type TypeElementsTable;

@@ -1,0 +1,10 @@
+// Shared definitions, pulled in by include.
+namespace kitchen.common;
+
+struct Vec3 {
+  x: double;
+  y: double;
+  z: double;
+}
+
+enum Race : ubyte { Amarr = 1, Caldari, Gallente, Minmatar }

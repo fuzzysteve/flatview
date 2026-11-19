@@ -1,0 +1,35 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.fighterAbilitiesByType;
+
+table FighterAbilitiesByType {
+  typeID: int (id: 0, key);
+  abilitySlot0: FighterAbilitiesByTypeAbilitySlot0 (id: 1, required);
+  abilitySlot1: FighterAbilitiesByTypeAbilitySlot1 (id: 2, required);
+  abilitySlot2: FighterAbilitiesByTypeAbilitySlot2 (id: 3);
+}
+
+table FighterAbilitiesByTypeAbilitySlot0 {
+  abilityID: int (id: 0);
+}
+
+table FighterAbilitiesByTypeAbilitySlot1 {
+  abilityID: int (id: 0);
+  cooldownSeconds: int (id: 1);
+}
+
+table FighterAbilitiesByTypeAbilitySlot2 {
+  abilityID: int (id: 0);
+  charges: FighterAbilitiesByTypeAbilitySlot2Charges (id: 1);
+}
+
+table FighterAbilitiesByTypeAbilitySlot2Charges {
+  chargeCount: int (id: 0);
+  rearmTimeSeconds: int (id: 1);
+}
+
+table FighterAbilitiesByTypeTable {
+  rows: [FighterAbilitiesByType] (id: 0, required);
+}
+
+root_type FighterAbilitiesByTypeTable;

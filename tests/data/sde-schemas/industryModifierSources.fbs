@@ -1,0 +1,44 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.industryModifierSources;
+
+table IndustryModifierSources {
+  typeID: int (id: 0, key);
+  copying: Activity (id: 1);
+  invention: Activity (id: 2);
+  manufacturing: ManufacturingActivity (id: 3);
+  reaction: ReactionActivity (id: 4);
+  researchMaterial: Activity (id: 5);
+  researchTime: Activity (id: 6);
+}
+
+table Activity {
+  cost: [Modifier] (id: 0);
+  time: [Modifier] (id: 1);
+}
+
+table Modifier {
+  dogmaAttributeID: int (id: 0);
+}
+
+table ManufacturingActivity {
+  cost: [Modifier] (id: 0);
+  material: [FilteredModifier] (id: 1);
+  time: [FilteredModifier] (id: 2);
+}
+
+table FilteredModifier {
+  dogmaAttributeID: int (id: 0);
+  filterID: int = null (id: 1);
+}
+
+table ReactionActivity {
+  material: [FilteredModifier] (id: 0, required);
+  time: [FilteredModifier] (id: 1, required);
+}
+
+table IndustryModifierSourcesTable {
+  rows: [IndustryModifierSources] (id: 0, required);
+}
+
+root_type IndustryModifierSourcesTable;

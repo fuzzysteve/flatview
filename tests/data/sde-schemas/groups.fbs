@@ -1,0 +1,32 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.groups;
+
+table Groups {
+  groupID: int (id: 0, key);
+  anchorable: bool = null (id: 1);
+  anchored: bool = null (id: 2);
+  categoryID: int (id: 3);
+  fittableNonSingleton: bool = null (id: 4);
+  iconID: int = null (id: 5);
+  name: Localized (id: 6, required);
+  published: bool = null (id: 7);
+  useBasePrice: bool = null (id: 8);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table GroupsTable {
+  rows: [Groups] (id: 0, required);
+}
+
+root_type GroupsTable;

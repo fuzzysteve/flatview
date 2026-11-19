@@ -1,0 +1,18 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.skinrSlotConfigurations;
+
+table SkinrSlotConfigurations {
+  id: int (id: 0, key);
+  allowAllShips: bool = null (id: 1);
+  config: [int] (id: 2, required);
+  name: string (id: 3, required);
+  priority: int (id: 4);
+  ships: [int] (id: 5);
+}
+
+table SkinrSlotConfigurationsTable {
+  rows: [SkinrSlotConfigurations] (id: 0, required);
+}
+
+root_type SkinrSlotConfigurationsTable;

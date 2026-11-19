@@ -1,0 +1,36 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.epicArcs;
+
+table EpicArcs {
+  epicArcID: int (id: 0, key);
+  arcRestartInterval: int (id: 1);
+  factionID: int = null (id: 2);
+  iconID: int = null (id: 3);
+  missions: [EpicArcsMissions] (id: 4, required);
+  name: Localized (id: 5, required);
+}
+
+table EpicArcsMissions {
+  missionID: int (id: 0, key);
+  agentID: int (id: 1);
+  failMissionID: int = null (id: 2);
+  nextMissions: [int] (id: 3);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table EpicArcsTable {
+  rows: [EpicArcs] (id: 0, required);
+}
+
+root_type EpicArcsTable;

@@ -1,0 +1,14 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.translationLanguages;
+
+table TranslationLanguages {
+  language: string (id: 0, key, required);
+  name: string (id: 1, required);
+}
+
+table TranslationLanguagesTable {
+  rows: [TranslationLanguages] (id: 0, required);
+}
+
+root_type TranslationLanguagesTable;

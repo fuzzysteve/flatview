@@ -1,0 +1,25 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.characterTitles;
+
+table CharacterTitles {
+  titleID: string (id: 0, key, required);
+  name: Localized (id: 1, required);
+}
+
+table Localized {
+  de: string (id: 0);
+  en: string (id: 1, required);
+  es: string (id: 2);
+  fr: string (id: 3);
+  ja: string (id: 4);
+  ko: string (id: 5);
+  ru: string (id: 6);
+  zh: string (id: 7);
+}
+
+table CharacterTitlesTable {
+  rows: [CharacterTitles] (id: 0, required);
+}
+
+root_type CharacterTitlesTable;

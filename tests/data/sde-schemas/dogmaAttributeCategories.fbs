@@ -1,0 +1,15 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.dogmaAttributeCategories;
+
+table DogmaAttributeCategories {
+  categoryID: int (id: 0, key);
+  description: string (id: 1);
+  name: string (id: 2, required);
+}
+
+table DogmaAttributeCategoriesTable {
+  rows: [DogmaAttributeCategories] (id: 0, required);
+}
+
+root_type DogmaAttributeCategoriesTable;

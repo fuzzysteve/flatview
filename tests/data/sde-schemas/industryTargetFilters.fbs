@@ -1,0 +1,16 @@
+// Generated from the Go struct of the table by sdefb. DO NOT EDIT.
+
+namespace sde.industryTargetFilters;
+
+table IndustryTargetFilters {
+  targetFilterID: int (id: 0, key);
+  categoryIDs: [int] (id: 1, required);
+  groupIDs: [int] (id: 2, required);
+  name: string (id: 3, required);
+}
+
+table IndustryTargetFiltersTable {
+  rows: [IndustryTargetFilters] (id: 0, required);
+}
+
+root_type IndustryTargetFiltersTable;
