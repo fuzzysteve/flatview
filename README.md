@@ -217,7 +217,8 @@ schema.verify(data, strict_enums=False, check_sorted=True, check_alignment=True,
 ```
 
 `check_sorted` matters: FlatBuffers lookups assume keyed vectors are sorted,
-so an unsorted vector makes `lookup()` silently wrong. `max_refs` bounds how
+so an unsorted vector makes `lookup()` silently wrong. It also rejects NaN
+float keys, which can't be ordered at all. `max_refs` bounds how
 many offsets are followed (default: buffer size / 4, the most a buffer
 without shared sub-objects can contain). See [Security](#security).
 
@@ -230,7 +231,8 @@ d = fb.root._asdict(defaults=False); ...; schema.encode(d)   # modify a copy
 ```
 
 Vectors of keyed tables are sorted by key (bytewise for strings, as
-FlatBuffers requires). Identical vtables and strings are written once. Every
+FlatBuffers requires). A NaN float key is refused, because no sorted order
+exists for it. Identical vtables and strings are written once. Every
 value is range-checked; enums accept names (`"Tool"`, or `"A B"` for
 bit flags); unknown fields and missing required fields raise `EncodeError`
 with the path to the value, using your input indices. Optional scalars

@@ -421,7 +421,7 @@ class _Encoder:
         if el == BaseType.OBJ:
             sub = t.ref
             indexed = list(enumerate(value))
-            if self.sort_keys and sub.key_field is not None and len(value) > 1:
+            if self.sort_keys and sub.key_field is not None:
                 indexed = self._sorted_by_key(sub, indexed, path)
             # paths use the caller's index, not the post-sort position
             offs = [self.table(sub, x, f"{path}[{i}]") for i, x in indexed]
@@ -457,6 +457,10 @@ class _Encoder:
                 return kf.default or 0
             if isinstance(k, str) and kf.type.enum is not None:
                 return self.enum_from_name(kf.type.enum, k, path)
+            if isinstance(k, float) and math.isnan(k):
+                # NaN is unordered: a vector containing it can't be sorted, and
+                # binary search over it (ours, or flatc's LookupByKey) misbehaves
+                raise EncodeError(f"{path}[{pair[0]}].{kf.name}", "NaN cannot be used as a key")
             return k
         try:
             return sorted(value, key=key)

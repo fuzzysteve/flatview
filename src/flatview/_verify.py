@@ -259,12 +259,15 @@ class _Verifier:
             for i in range(n):
                 p = start + 4 * i
                 self.table(sub, self.deref(p, f"{fpath}[{i}]", "table"), f"{fpath}[{i}]", depth + 1)
-            if self.sorted and sub.key_field is not None and n > 1:
+            if self.sorted and sub.key_field is not None and n > 0:
                 kr = _key_reader(sub)
                 prev = None
                 for i in range(n):
                     p = start + 4 * i
                     k = kr(self.buf, p + _u32(self.buf, p)[0])
+                    if k != k:     # NaN: unordered, so no binary search over this vector is correct
+                        self.fail(f"{fpath}[{i}]", f"key {sub.key_field.name} is NaN; lookups on this "
+                                  "vector would be wrong")
                     if prev is not None and k < prev:
                         self.fail(f"{fpath}[{i}]", f"vector is not sorted by key {sub.key_field.name} "
                                   f"({_show(k)} after {_show(prev)}); lookups would be wrong")

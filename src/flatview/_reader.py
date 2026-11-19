@@ -369,6 +369,8 @@ class TableVector(Vector):
         """Index of the first element whose key is >= ``key`` (vector must be sorted)."""
         kr = self._key_reader()
         key = self._normalise_key(key)
+        if key != key:
+            raise ValueError("NaN is unordered and cannot be searched for")
         buf, lo, hi = self._buf, 0, self._len
         while lo < hi:
             mid = (lo + hi) // 2
@@ -380,6 +382,8 @@ class TableVector(Vector):
 
     def find(self, key: Any, default: Any = None) -> Any:
         """Binary-search for the element with this key; ``default`` if missing."""
+        if key != key:
+            return default      # NaN equals nothing, so it is never present
         i = self.bisect(key)
         if i < self._len and self._key_reader()(self._buf, self._pos_at(i)) == self._normalise_key(key):
             return self._at(i)
@@ -413,6 +417,8 @@ class TableVector(Vector):
         prev = _MISSING
         for i in range(self._len):
             k = kr(self._buf, self._pos_at(i))
+            if k != k:                  # a NaN key makes the order undefined
+                return False
             if prev is not _MISSING and k < prev:
                 return False
             prev = k
