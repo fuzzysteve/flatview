@@ -74,7 +74,9 @@ library itself has no runtime dependencies; keep it that way.
   2 GiB).
 - `.fbs` includes resolve only inside `ctx.include_roots` (the main schema's directory
   plus `include_paths`), checked on the real path. Never add a cwd fallback or follow a
-  path outside the roots.
+  path outside the roots. Includes are read only via `_read_confined()`: it opens
+  non-blocking, requires a regular file, then re-checks what was actually opened (the
+  fd's own path, or a device/inode match), so a swap between check and open is caught.
 - `render()` must validate every name as an identifier and emit strings only via
   `_quote()`. Doc comments are split per line, because rendered text gets parsed again.
 - Never auto-detect size prefixes. A valid buffer's root offset can equal `len - 4`

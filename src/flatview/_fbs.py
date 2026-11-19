@@ -13,6 +13,8 @@ from __future__ import annotations
 import math
 import os
 import re
+import stat
+import sys
 from dataclasses import dataclass, field as dc_field
 from typing import Any
 
@@ -297,10 +299,16 @@ class _Parser:
         if real in ctx.seen_files:
             return
         ctx.seen_files.add(real)
-        with open(real, encoding="utf-8") as fh:
-            text = fh.read(_MAX_SCHEMA_BYTES + 1)
-        if len(text) > _MAX_SCHEMA_BYTES:
-            raise self.err(f"included file {path!r} is larger than {_MAX_SCHEMA_BYTES:,} bytes", tok)
+        try:
+            data = _read_confined(real, ctx.include_roots)
+        except _Unsafe as e:
+            raise self.err(f"refusing to include {path!r}: {e}", tok) from None
+        except OSError as e:
+            raise self.err(f"cannot read included file {path!r}: {e.strerror or e}", tok) from None
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raise self.err(f"included file {path!r} is not UTF-8 text", tok) from None
         _Parser(text, real, ctx, is_main=False).parse()
 
     def parse_attrs(self) -> dict[str, str]:
@@ -957,6 +965,69 @@ def _within(path: str, root: str) -> bool:
 
 
 _MAX_SCHEMA_BYTES = 64 << 20
+
+
+class _Unsafe(Exception):
+    """An include resolved to something it must not read."""
+
+
+def _fd_path(fd: int) -> str | None:
+    """The real path of an open file, from the descriptor itself; None if the
+    platform cannot tell us (then the caller falls back to an inode check)."""
+    proc = f"/proc/self/fd/{fd}"
+    if sys.platform.startswith("linux") and os.path.exists(proc):
+        target = os.readlink(proc)
+        return None if target.endswith(" (deleted)") else target
+    if sys.platform == "darwin":
+        import fcntl
+        if hasattr(fcntl, "F_GETPATH"):
+            buf = fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024))
+            return os.fsdecode(buf.split(b"\0", 1)[0])
+    return None
+
+
+def _read_confined(real: str, roots: list[str]) -> bytes:
+    """Read an include whose path was checked to lie inside ``roots``.
+
+    The check and the open are separate steps, so a path component could be
+    swapped for a symlink (or the file for a FIFO) in between. This opens
+    first and then re-checks what was *actually* opened: the descriptor's own
+    path where the OS provides it, otherwise the checked path must still
+    name the very same file (device and inode). Opening is non-blocking, so
+    a FIFO cannot hang the parser, and only regular files are read.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0) \
+        | getattr(os, "O_BINARY", 0)
+    fd = os.open(real, flags)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise _Unsafe("not a regular file")
+        actual = _fd_path(fd)
+        if actual is not None:
+            if not any(_within(actual, root) for root in roots):
+                raise _Unsafe("it resolved outside the schema directory and include_paths")
+        else:
+            try:
+                now = os.stat(real)
+            except OSError:
+                raise _Unsafe("the file changed while it was being opened") from None
+            if (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino) or os.path.realpath(real) != real:
+                raise _Unsafe("the file changed while it was being opened")
+        if hasattr(os, "set_blocking"):
+            os.set_blocking(fd, True)
+        chunks, size = [], 0
+        while size <= _MAX_SCHEMA_BYTES:
+            chunk = os.read(fd, min(1 << 20, _MAX_SCHEMA_BYTES + 1 - size))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        if size > _MAX_SCHEMA_BYTES:
+            raise _Unsafe(f"it is larger than {_MAX_SCHEMA_BYTES:,} bytes")
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
 
 
 def parse_fbs(text: str, filename: str = "<string>", include_paths: list[str] | None = None,

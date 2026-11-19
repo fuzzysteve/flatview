@@ -4,6 +4,7 @@ import builtins
 import struct
 import importlib.util
 import json
+import os
 import time
 import zlib
 from pathlib import Path
@@ -600,3 +601,92 @@ def test_reads_confined_to_the_given_slice(kitchen_schema):
         except Exception:
             continue        # malformed input may fail, but must not leak
         assert "SECRET" not in out and "hunter2" not in out
+
+
+# ---------------------------------------------------------------------------
+# include: check-then-open race (TOCTOU)
+
+import flatview._fbs as _fbs_mod
+
+
+@pytest.fixture(params=["fd-path", "inode-fallback"])
+def include_mode(request, monkeypatch):
+    """Run each race test with the descriptor-path check and with the
+    fallback used on platforms that cannot report an fd's path."""
+    if request.param == "inode-fallback":
+        monkeypatch.setattr(_fbs_mod, "_fd_path", lambda fd: None)
+    elif _fbs_mod._fd_path(os.open(__file__, os.O_RDONLY)) is None:
+        pytest.skip("this platform cannot report an fd's path")
+    return request.param
+
+
+def _swap_before_open(monkeypatch, target: Path, swap):
+    """Make os.open run ``swap()`` just before it opens ``target``, i.e. in the
+    window after include() has checked the path."""
+    real_open = os.open
+    fired = []
+
+    def racing_open(path, flags, *a, **kw):
+        if not fired and os.fspath(path) == os.path.realpath(target):
+            fired.append(True)
+            swap()
+        return real_open(path, flags, *a, **kw)
+    monkeypatch.setattr(os, "open", racing_open)
+    return fired
+
+
+def _swap_to_symlink(link: Path, to: Path):
+    tmp = link.with_name(link.name + ".swap")
+    os.symlink(to, tmp)
+    os.replace(tmp, link)
+
+
+def test_include_swapped_for_symlink_after_check(secret_tree, monkeypatch, include_mode):
+    tmp, schemas = secret_tree
+    victim = schemas / "common.fbs"
+    fired = _swap_before_open(monkeypatch, victim, lambda: _swap_to_symlink(victim, tmp / "secret.txt"))
+    with pytest.raises(SchemaError, match="refusing to include") as e:
+        flatview.load_schema(_main(schemas, "common.fbs"))
+    assert fired and SECRET not in str(e.value)
+
+
+def test_include_directory_component_swapped(secret_tree, monkeypatch, include_mode):
+    tmp, schemas = secret_tree
+    outside = tmp / "outside"
+    outside.mkdir()
+    (outside / "deep.fbs").write_text(f"table {SECRET} {{ v: int; }}\n")
+    sub = schemas / "sub"
+    def swap():
+        os.rename(sub, schemas / "sub.orig")
+        os.symlink(outside, sub)
+    fired = _swap_before_open(monkeypatch, sub / "deep.fbs", swap)
+    with pytest.raises(SchemaError, match="refusing to include") as e:
+        flatview.load_schema(_main(schemas, "sub/deep.fbs"))
+    assert fired and SECRET not in str(e.value)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFOs")
+def test_include_swapped_for_fifo_does_not_hang(secret_tree, monkeypatch, include_mode):
+    _, schemas = secret_tree
+    victim = schemas / "common.fbs"
+    def swap():
+        victim.unlink()
+        os.mkfifo(victim)
+    fired = _swap_before_open(monkeypatch, victim, swap)
+    t = time.perf_counter()
+    with pytest.raises(SchemaError, match="not a regular file"):
+        flatview.load_schema(_main(schemas, "common.fbs"))
+    assert fired and time.perf_counter() - t < 5
+
+
+def test_legitimate_symlink_inside_roots_still_works(secret_tree, include_mode):
+    _, schemas = secret_tree
+    os.symlink(schemas / "common.fbs", schemas / "alias.fbs")
+    assert "Common" in flatview.load_schema(_main(schemas, "alias.fbs")).objects
+
+
+def test_include_not_utf8(secret_tree):
+    _, schemas = secret_tree
+    (schemas / "bin.fbs").write_bytes(b"\xff\xfe\x00 table")
+    with pytest.raises(SchemaError, match="not UTF-8"):
+        flatview.load_schema(_main(schemas, "bin.fbs"))
