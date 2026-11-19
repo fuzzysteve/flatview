@@ -90,6 +90,14 @@ library itself has no runtime dependencies; keep it that way.
 - Reader and verifier must agree on edge cases. For example, empty nested flatbuffers
   are rejected by the verifier and refused by the encoder, as flatc does.
 
+## Differential testing (fuzz/)
+
+`fuzz/verifier_parity.py` and `fuzz/schema_parity.py` compare against flatc's own C++ and
+parser (README, "Differential testing"). Any "ours-accepts-flatc-rejects" or decode
+difference is a bug. Pin each fixed case in `tests/test_flatc_parity.py` (verifier) or
+the `CORPUS` list (schemas), and keep the README's list of intentional differences
+current.
+
 ## Testing conventions
 
 - Cross-check new features against flatc in both directions. Encode with flatview and

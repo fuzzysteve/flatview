@@ -28,6 +28,7 @@ testpaths = ["tests"]
 markers = [
     "sde_full: needs the full SDE example set (run scripts/fetch_sde_examples.py)",
     "flatc: needs the flatc compiler on PATH",
+    "oracle: differential fuzzing against flatc's C++ (FLATVIEW_ORACLE=1)",
 ]
 
 [build-system]

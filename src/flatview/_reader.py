@@ -781,8 +781,14 @@ def _plain(v: Any, defaults: bool, enums: str, deprecated: bool) -> Any:
         # enum member
         if enums == "name":
             if isinstance(v, enum.Flag):
-                # flatc's JSON form for bit flags: space-separated names
-                return " ".join(m.name for m in type(v) if m.value and (v & m) == m) if v else 0
+                # flatc's JSON form for bit flags: space-separated names, or
+                # the number when it has bits no member defines
+                known = 0
+                for m in type(v):
+                    known |= m.value
+                if not v or int(v) & ~known:
+                    return int(v)
+                return " ".join(m.name for m in type(v) if m.value and (v & m) == m)
             return v.name if getattr(v, "name", None) else int(v)
         if enums == "value":
             return int(v)

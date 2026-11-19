@@ -20,10 +20,13 @@ from ._schema import BaseType, Enum, Field, Object, Schema, SCALAR_FORMAT, SCALA
 def _flag_namer(enum_: Enum) -> Callable[[int], Any]:
     """flatc-style space-separated names for a bit_flags value."""
     members = [(v.name, v.value) for v in enum_.values if v.value]
+    known = 0
+    for _, m in members:
+        known |= m
 
     def name(v: int) -> Any:
-        if not v:
-            return 0
+        if not v or v & ~known:
+            return v        # bits no member names: keep the number (as flatc does)
         return " ".join(n for n, m in members if (v & m) == m)
     return name
 
@@ -231,7 +234,9 @@ class _Gen:
             full, vtd, z = self.vt_reader(nslots)
             lines += [
                 "    k = (u16(buf, vt)[0] - 4) >> 1",
-                f"    e = {full}(buf, vt + 4) if k >= {nslots} else {vtd}[k](buf, vt + 4) + {z}[{nslots} - k]",
+                # 0/2-byte vtables are valid and mean "no fields" (k <= 0)
+                f"    e = {full}(buf, vt + 4) if k >= {nslots} else "
+                f"({vtd}[k](buf, vt + 4) + {z}[{nslots} - k] if k > 0 else {z}[{nslots}])",
             ]
         for f in fields:
             lines += self.table_field(obj, f)

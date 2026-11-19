@@ -296,6 +296,31 @@ it's up to you:
   files by atomic rename is safe. `open(..., use_mmap=False)` avoids mmap
   entirely.
 
+## Differential testing against flatc
+
+`fuzz/` checks flatview against flatc itself. It needs `flatc` and `g++`;
+the first run downloads the matching flatbuffers source into `fuzz/.cache/`.
+
+```bash
+uv run python fuzz/verifier_parity.py --seconds 120   # mutated buffers vs flatc's generated C++ verifier + JSON
+uv run python fuzz/schema_parity.py --seconds 120     # mutated .fbs vs flatc --schema -b
+uv run python fuzz/explain.py schema.fbs buf.bin      # where flatc's verifier rejects a buffer
+FLATVIEW_ORACLE=1 uv run pytest -m oracle             # short verifier fuzz as a test
+```
+
+The verifier accepts exactly what flatc's verifier accepts and decodes
+identically, except where flatview is deliberately stricter:
+- key order, UTF-8 and the `max_refs` budget (each switchable);
+- zero offsets in vector elements, which flatc follows to the slot itself;
+- deprecated fields, which flatc skips but flatview still lets you read.
+
+The `.fbs` parser accepts and rejects what flatc does, except where flatc
+has bugs or writes broken output:
+- a struct containing itself;
+- `enum E : E`;
+- duplicate enum values that flatc's uniqueness check misses;
+- structs over 65,535 bytes, whose `.bfbs` offsets flatc silently wraps.
+
 ## Worked example: the EVE Online SDE
 
 CCP publishes EVE Online's Static Data Export as FlatBuffers at

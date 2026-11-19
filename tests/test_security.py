@@ -319,10 +319,12 @@ def test_ordinary_enum_names_still_members():
 
 def test_deep_struct_nesting_any_declaration_order():
     n = 3000
-    decls = [f"struct S{i} {{ s: S{i - 1}; }}" for i in range(1, n)] + ["struct S0 { a: int; }"]
-    for order in (decls, decls[::-1]):
-        s = parse_fbs("\n".join(order))
-        assert s["S2999"].bytesize == 4
+    decls = ["struct S0 { a: int; }"] + [f"struct S{i} {{ s: S{i - 1}; }}" for i in range(1, n)]
+    assert parse_fbs("\n".join(decls))["S2999"].bytesize == 4
+    # Reverse order is invalid (flatc: inner structs must come first) and must
+    # fail cleanly, not by recursion.
+    with pytest.raises(SchemaError, match="Incomplete type in struct"):
+        parse_fbs("\n".join(decls[::-1]))
 
 
 def test_deep_table_type_chain_converts():

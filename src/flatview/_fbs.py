@@ -22,21 +22,26 @@ from ._schema import (
 )
 
 #: Attributes flatc treats as built in (not written to .bfbs by default).
-BUILTIN_ATTRIBUTES = frozenset({
+BUILTIN_ATTRIBUTES = frozenset({          # flatc's known_attributes_ (idl.h), exactly
     "deprecated", "required", "key", "shared", "hash", "id", "force_align",
     "bit_flags", "original_order", "nested_flatbuffer", "csharp_partial",
     "streaming", "idempotent", "cpp_type", "cpp_ptr_type", "cpp_ptr_type_get",
-    "cpp_str_type", "cpp_str_flex_ctor", "native_inline", "native_type",
-    "native_custom_alloc", "native_default", "flexbuffer", "private",
-    "offset64", "vector64", "java_package",
+    "cpp_str_type", "cpp_str_flex_ctor", "native_inline", "native_custom_alloc",
+    "native_type", "native_type_pack_name", "native_default", "flexbuffer",
+    "private", "offset64", "vector64",
 })
+
+#: flatc's FLATBUFFERS_MAX_ALIGNMENT
+MAX_ALIGNMENT = 32
+_HASHES = {16: ("fnv1_16", "fnv1a_16"), 32: ("fnv1_32", "fnv1a_32"), 64: ("fnv1_64", "fnv1a_64")}
 
 _TOKEN = re.compile(r"""
     (?P<ws>[ \t\r\n]+)
   | (?P<doc>///[^\n]*)
   | (?P<comment>//[^\n]*|/\*.*?\*/)
   | (?P<string>"(?:[^"\\]|\\.)*")
-  | (?P<number>[-+]?(?:0[xX][0-9a-fA-F]+|(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?))
+  | (?P<number>[-+]?(?:0[xX](?:[0-9a-fA-F]+\.?[0-9a-fA-F]*|\.[0-9a-fA-F]+)(?:[pP][-+]?\d+)?
+                       |(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?))
   | (?P<ident>[-+]?[A-Za-z_][A-Za-z0-9_]*)
   | (?P<punct>[{}()\[\]:;,=.])
 """, re.S | re.X)
@@ -80,6 +85,7 @@ class _FieldDecl:
     attrs: dict[str, str]
     docs: list[str]
     line: int
+    seq: int = 0           # parse position (flatc's checks depend on what came before)
 
 
 @dataclass
@@ -92,6 +98,8 @@ class _ObjDecl:
     docs: list[str]
     file: str
     line: int
+    order: int = 0          # position among all declarations (flatc is order-sensitive)
+    seq: int = 0            # parse position of the declaration's start
 
 
 @dataclass
@@ -114,13 +122,18 @@ class _EnumDecl:
     docs: list[str]
     file: str
     line: int
+    order: int = 0
 
 
 @dataclass
 class _Ctx:
     objects: list[_ObjDecl] = dc_field(default_factory=list)
     enums: list[_EnumDecl] = dc_field(default_factory=list)
-    root: tuple[str, str, str, int] | None = None   # (name, namespace, file, line)
+    root: tuple[str, str, str, int, int] | None = None   # (name, namespace, file, line, order)
+    roots: list[tuple[str, str, str, int, int]] = dc_field(default_factory=list)  # every root_type
+    seq: int = 0
+    services: list[tuple[str, str, str, int]] = dc_field(default_factory=list)  # (type, ns, file, line)
+    decl_count: int = 0
     file_ident: str | None = None
     file_ext: str | None = None
     attributes: set[str] = dc_field(default_factory=set)
@@ -152,7 +165,8 @@ class _Parser:
 
     def next(self) -> _Tok:
         t = self.toks[self.i]
-        self.i += 1
+        if t.kind != "eof":           # never step past the end
+            self.i += 1
         return t
 
     def accept(self, text: str) -> bool:
@@ -216,6 +230,8 @@ class _Parser:
                 name = self.string() if self.tok.kind == "string" else self.ident()
                 self.ctx.attributes.add(name)
                 self.expect(";")
+            elif kw == "{":
+                raise self.err("JSON data in schema files is not supported")
             elif kw in ("table", "struct"):
                 self.parse_object()
             elif kw in ("enum", "union"):
@@ -225,7 +241,9 @@ class _Parser:
                 name = self.dotted()
                 self.expect(";")
                 if self.is_main:
-                    self.ctx.root = (name, self.ns, self.file, t.line)
+                    # flatc resolves root_type immediately: the table must precede it
+                    self.ctx.root = (name, self.ns, self.file, t.line, self.ctx.decl_count)
+                    self.ctx.roots.append(self.ctx.root)
             elif kw == "file_identifier":
                 self.next()
                 ident = self.string()
@@ -239,11 +257,9 @@ class _Parser:
                 ext = self.string()
                 self.expect(";")
                 if self.is_main:
-                    self.ctx.file_ext = ext
+                    self.ctx.file_ext = ext or None
             elif kw == "rpc_service":
-                self.skip_service()
-            elif kw == "{":
-                raise self.err("JSON data in schema files is not supported")
+                self.parse_service()
             else:
                 raise self.err(f"unexpected {kw!r}")
 
@@ -288,21 +304,39 @@ class _Parser:
         _Parser(text, real, ctx, is_main=False).parse()
 
     def parse_attrs(self) -> dict[str, str]:
+        """Attribute list, with flatc's rules: at least one entry; names are
+        built in or declared earlier with ``attribute``; values are strings or
+        32-bit integers (stored in decimal); a repeated name keeps its first
+        value."""
         attrs: dict[str, str] = {}
         if not self.accept("("):
             return attrs
-        while not self.accept(")"):
-            name = self.ident()
+        while True:
+            t = self.tok
+            if t.kind == "string":
+                self.next()
+                name = self.unquote(t)
+            elif t.kind == "ident" and t.text[0] not in "+-":
+                self.next()
+                name = t.text
+            else:
+                raise self.err(f"attribute name must be either identifier or string: {t.text!r}", t)
+            if name not in BUILTIN_ATTRIBUTES and name not in self.ctx.attributes:
+                raise self.err(f"user define attributes must be declared before use: {name}", t)
             val = "0"
             if self.accept(":"):
-                t = self.next()
-                if t.kind == "string":
-                    val = self.unquote(t)
-                elif t.kind in ("number", "ident"):
-                    val = t.text
+                v = self.next()
+                if v.kind == "string":
+                    val = self.unquote(v)
+                elif v.kind == "number" and re.fullmatch(r"[-+]?(0[xX][0-9a-fA-F]+|[0-9]+)", v.text):
+                    n = int(v.text, 0) if len(v.text) < 64 else None
+                    if n is None or not -(1 << 31) <= n < (1 << 31):
+                        raise self.err(f"invalid number {v.text[:40]!r}: attribute values must fit a 32-bit "
+                                       "integer", v)
+                    val = str(n)
                 else:
-                    raise self.err(f"bad attribute value {t.text!r}", t)
-            attrs[name] = val
+                    raise self.err(f"attribute value must be a string or integer, got {v.text!r}", v)
+            attrs.setdefault(name, val)
             if not self.accept(","):
                 self.expect(")")
                 break
@@ -327,6 +361,8 @@ class _Parser:
     def parse_object(self) -> None:
         start = self.next()
         docs = start.docs
+        self.ctx.seq += 1
+        decl_seq = self.ctx.seq
         name = self.ident()
         attrs = self.parse_attrs()
         self.expect("{")
@@ -346,9 +382,12 @@ class _Parser:
                     default = t.text
             fattrs = self.parse_attrs()
             self.expect(";")
-            fields.append(_FieldDecl(fname, ftype, default, fattrs, ft.docs, ft.line))
+            self.ctx.seq += 1
+            fields.append(_FieldDecl(fname, ftype, default, fattrs, ft.docs, ft.line, self.ctx.seq))
+        self.ctx.decl_count += 1
         self.ctx.objects.append(_ObjDecl(self.qualify(name), self.ns, start.text == "struct",
-                                         fields, attrs, docs, self.file, start.line))
+                                         fields, attrs, docs, self.file, start.line, self.ctx.decl_count,
+                                         decl_seq))
 
     def parse_enum(self) -> None:
         start = self.next()
@@ -369,6 +408,9 @@ class _Parser:
                     utype = self.dotted()
                 else:
                     utype = vname
+                    if vname == "string":
+                        raise self.err("type referenced but not defined (check namespace): string "
+                                       "(a string union member needs a name: `S: string`)", vt)
                 vname = vname.replace(".", "_")
             value = None
             if self.accept("="):
@@ -378,23 +420,31 @@ class _Parser:
             if not self.accept(","):
                 self.expect("}")
                 break
+        self.ctx.decl_count += 1
         self.ctx.enums.append(_EnumDecl(self.qualify(name), self.ns, is_union, underlying,
-                                        values, attrs, start.docs, self.file, start.line))
+                                        values, attrs, start.docs, self.file, start.line,
+                                        self.ctx.decl_count))
 
-    def skip_service(self) -> None:
+    def parse_service(self) -> None:
+        """rpc_service Name (attrs)? { Method(Request): Response (attrs)?; ... }
+
+        Parsed and validated (request/response must be tables), not kept.
+        """
         self.next()
         self.ident()
         self.parse_attrs()
         self.expect("{")
-        depth = 1
-        while depth:
-            t = self.next()
-            if t.kind == "eof":
-                raise self.err("unterminated rpc_service")
-            if t.text == "{":
-                depth += 1
-            elif t.text == "}":
-                depth -= 1
+        while not self.accept("}"):
+            self.ident()
+            self.expect("(")
+            req = self.tok
+            self.ctx.services.append((self.dotted(), self.ns, self.file, req.line))
+            self.expect(")")
+            self.expect(":")
+            resp = self.tok
+            self.ctx.services.append((self.dotted(), self.ns, self.file, resp.line))
+            self.parse_attrs()
+            self.expect(";")
 
 
 _SIMPLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", "0": "\0",
@@ -457,6 +507,8 @@ class _Resolver:
         self.ctx = ctx
         self.schema = Schema()
         self.decls: dict[str, Any] = {}
+        self.order: dict[str, int] = {}
+        self._first_seen: dict[str, int] | None = None
 
     def lookup(self, name: str, ns: str, where: str) -> Object | Enum:
         parts = ns.split(".") if ns else []
@@ -480,6 +532,8 @@ class _Resolver:
                 raise SchemaError(f"{d.file}:{d.line}: {d.name} is defined twice")
             schema.enums[d.name] = Enum(d.name, is_union=d.is_union, attributes=dict(d.attrs),
                                         documentation=list(d.docs), declaration_file=d.file)
+        for d in (*ctx.objects, *ctx.enums):
+            self.order[d.name] = d.order
         for d in ctx.enums:
             self.resolve_enum(d)
         for d in ctx.objects:
@@ -491,9 +545,17 @@ class _Resolver:
         for d in ctx.objects:
             if not d.is_struct:
                 self.check_nested(schema.objects[d.name], d)
-        if ctx.root:
-            name, ns, file, line = ctx.root
-            root = self.lookup(name, ns, f"{file}:{line}")
+        for name, ns, file, line in ctx.services:
+            t = self.lookup(name, ns, f"{file}:{line}")
+            if not isinstance(t, Object) or t.is_struct:
+                raise SchemaError(f"{file}:{line}: rpc request and response types must be tables: {name}")
+        for name, ns, file, line, seen in ctx.roots:      # every root_type, as flatc checks each
+            try:
+                root = self.lookup(name, ns, f"{file}:{line}")
+            except SchemaError:
+                raise SchemaError(f"{file}:{line}: unknown root type: {name}") from None
+            if self.order[root.name] > seen:
+                raise SchemaError(f"{file}:{line}: unknown root type: {name} (declare it before root_type)")
             if not isinstance(root, Object) or root.is_struct:
                 raise SchemaError(f"{file}:{line}: root_type {name} must be a table")
             schema.root = root
@@ -516,41 +578,60 @@ class _Resolver:
             if not d.underlying:
                 raise SchemaError(f"{where}: enum {d.name} needs an underlying type")
             bt = TYPE_NAMES.get(d.underlying)
-            if bt is None or not bt.is_integer:
+            if bt is None or not bt.is_integer or bt == BaseType.BOOL:
                 raise SchemaError(f"{where}: enum underlying type must be an integer type")
             e.underlying = bt
+        if not d.values and not d.is_union:
+            raise SchemaError(f"{where}: incomplete enum declaration, values not found")
+        lo, hi = INT_RANGE[e.underlying]
+        width = 8 * SCALAR_SIZE[e.underlying]
+        signed = lo < 0
         nxt = 1 if d.is_union else 0
         for v in d.values:
             if v.value is not None:
-                try:
-                    val = int(v.value, 0)
-                except ValueError:
-                    raise SchemaError(f"{where}: bad enum value {v.value!r}") from None
+                if not re.fullmatch(r"[-+]?(0[xX][0-9a-fA-F]+|[0-9]+)", v.value) or len(v.value) > 40:
+                    raise SchemaError(f"{where}: bad enum value {v.value[:40]!r}")
+                val = int(v.value, 0)
             else:
                 val = nxt
             nxt = val + 1
+            # range of the value as written (a bit position, for bit_flags)
+            if not lo <= val <= hi:
+                raise SchemaError(f"{where}: enum value does not fit, {v.name}={val} out of [{lo}; {hi}]")
             ut = None
             if d.is_union:
-                target = self.lookup(v.union_type, d.namespace, where)
-                if isinstance(target, Enum):
-                    raise SchemaError(f"{where}: union member {v.union_type} must be a table")
-                ut = Type(BaseType.OBJ, ref=target)
-            elif d.is_union is False and e.bit_flags:
+                if v.union_type == "string":
+                    ut = Type(BaseType.STRING)
+                else:
+                    target = self.lookup(v.union_type, d.namespace, where)
+                    if isinstance(target, Enum):
+                        raise SchemaError(f"{where}: union member {v.union_type} must be a table")
+                    ut = Type(BaseType.OBJ, ref=target)
+            elif e.bit_flags:
+                # checked before shifting: a huge position must never reach 1 << val
+                if signed and val == width - 1:
+                    raise SchemaError(f"{where}: underlying type of bit_flags enum must be unsigned")
+                if val < 0 or val >= width:
+                    raise SchemaError(f"{where}: bit flag out of range of underlying integral type")
                 val = 1 << val
             e.values.append(EnumVal(v.name, val, ut, dict(v.attrs), list(v.docs)))
-        if not d.is_union:
-            lo, hi = INT_RANGE[e.underlying]
-            for v in e.values:
-                if not lo <= v.value <= hi:
-                    raise SchemaError(f"{where}: enum value {v.name}={v.value} out of range "
-                                      f"for {d.underlying}")
         seen = set()
         for v in e.values:
             if v.name in seen:
                 raise SchemaError(f"{where}: duplicate enum value name {v.name}")
             seen.add(v.name)
+        # as flatc/reflection: values sorted by value, and all distinct
+        e.values.sort(key=lambda v: v.value)
+        for a, b in zip(e.values, e.values[1:]):
+            if a.value == b.value:
+                raise SchemaError(f"{where}: all enum values must be unique: {a.name} and {b.name} "
+                                  f"are both {a.value}")
+        e._by_value = e._by_name = None
 
-    def make_type(self, t: tuple, ns: str, where: str, in_struct: bool) -> Type:
+    def make_type(self, t: tuple, ns: str, where: str, in_struct: bool, owner: int = 1 << 62) -> Type:
+        """Resolve a type. ``owner`` is the declaring object's position: like
+        flatc, enums/unions and (inside structs) structs must be declared
+        before they are used; tables may be referenced from anywhere."""
         kind = t[0]
         if kind == "name":
             name = t[1]
@@ -558,10 +639,16 @@ class _Resolver:
             if bt is not None:
                 return Type(bt)
             ref = self.lookup(name, ns, where)
+            order = self.order.get(ref.name, 0)
             if isinstance(ref, Enum):
+                if order > owner:
+                    raise SchemaError(f"{where}: type referenced but not defined (check namespace): {name} "
+                                      "(enums and unions must be declared before use)")
                 return Type(BaseType.UNION if ref.is_union else ref.underlying, ref=ref)
+            if in_struct and ref.is_struct and order > owner:
+                raise SchemaError(f"{where}: Incomplete type in struct is not allowed, type name: {name}")
             return Type(BaseType.OBJ, ref=ref)
-        inner = self.make_type(t[1], ns, where, in_struct)
+        inner = self.make_type(t[1], ns, where, in_struct, owner)
         if inner.base in (BaseType.VECTOR, BaseType.ARRAY):
             raise SchemaError(f"{where}: nested vectors/arrays are not allowed")
         if kind == "vector":
@@ -583,7 +670,9 @@ class _Resolver:
         next_id = 0
         for fd in d.fields:
             where = f"{d.file}:{fd.line}"
-            ftype = self.make_type(fd.type, d.namespace, where, d.is_struct)
+            ftype = self.make_type(fd.type, d.namespace, where, d.is_struct, d.order)
+            if self.known_object_named(fd.name, d.namespace, fd.seq):
+                raise SchemaError(f"{where}: field name can not be the same as table/struct name")
             if d.is_struct:
                 if ftype.item in (BaseType.STRING, BaseType.UNION) or (
                         ftype.item == BaseType.OBJ and not ftype.ref.is_struct):
@@ -592,6 +681,10 @@ class _Resolver:
             f.deprecated = "deprecated" in fd.attrs
             f.required = "required" in fd.attrs
             f.key = "key" in fd.attrs
+            self.check_field_attrs(f, d.is_struct, where)
+            if d.is_struct and fd.default is not None and fd.default not in ("0", "0.0", "false"):
+                raise SchemaError(f"{where}: default values are not supported for struct fields, table "
+                                  "fields, or in structs")
             self.set_default(f, fd, where)
             if ftype.item == BaseType.UNION:
                 if d.is_struct:
@@ -606,6 +699,7 @@ class _Resolver:
                 if explicit_ids:
                     vid = _to_int(fd.attrs["id"], where, "field id")
                     tf.id, f.id = vid - 1, vid
+                    tf.attributes["id"] = str(vid - 1)     # as flatc records it
                 else:
                     tf.id, f.id = next_id, next_id + 1
                     next_id += 2
@@ -640,6 +734,58 @@ class _Resolver:
         obj._by_name = None
         obj._key = False
 
+    def known_object_named(self, name: str, ns: str, seq: int) -> bool:
+        """flatc: a field may not be named like a table/struct it already knows
+        (declared, or referenced by an earlier field), resolved from ``ns``."""
+        if self._first_seen is None:
+            first: dict[str, int] = {}
+            for d in self.ctx.objects:
+                first[d.name] = min(first.get(d.name, d.seq), d.seq)
+            for d in self.ctx.objects:
+                for fd in d.fields:
+                    t = fd.type
+                    while t[0] != "name":
+                        t = t[1]
+                    if t[1] in TYPE_NAMES:
+                        continue
+                    try:
+                        ref = self.lookup(t[1], d.namespace, "")
+                    except SchemaError:
+                        continue
+                    if isinstance(ref, Object):
+                        first[ref.name] = min(first.get(ref.name, fd.seq), fd.seq)
+            self._first_seen = first
+        try:
+            ref = self.lookup(name, ns, "")
+        except SchemaError:
+            return False
+        return isinstance(ref, Object) and self._first_seen.get(ref.name, 1 << 62) < seq
+
+    def check_field_attrs(self, f: Field, in_struct: bool, where: str) -> None:
+        """flatc's per-field attribute rules."""
+        t = f.type
+        if f.required and t.base.is_scalar and not in_struct:
+            raise SchemaError(f"{where}: only non-scalar fields in tables may be 'required'")
+        if f.key and not (t.base.is_scalar or t.base == BaseType.STRING or
+                          (t.base == BaseType.ARRAY and t.element.is_scalar)):
+            raise SchemaError(f"{where}: 'key' field must be string, scalar type or fixed size array of scalars")
+        if "hash" in f.attributes:
+            item = t.element if t.base == BaseType.VECTOR else t.base
+            widths = {BaseType.SHORT: 16, BaseType.USHORT: 16, BaseType.INT: 32, BaseType.UINT: 32,
+                      BaseType.LONG: 64, BaseType.ULONG: 64}
+            if item not in widths or t.enum is not None:
+                raise SchemaError(f"{where}: only short, ushort, int, uint, long and ulong data types "
+                                  "support hashing")
+            if f.attributes["hash"] not in _HASHES[widths[item]]:
+                raise SchemaError(f"{where}: Unknown hashing algorithm for {widths[item]} bit types: "
+                                  f"{f.attributes['hash']}")
+        if "flexbuffer" in f.attributes and not (t.base == BaseType.VECTOR and t.element == BaseType.UBYTE):
+            raise SchemaError(f"{where}: flexbuffer attribute may only apply to a vector of ubyte")
+        if "force_align" in f.attributes:
+            fa = _to_int(f.attributes["force_align"], where, "force_align")
+            if fa < 1 or fa & (fa - 1) or fa > MAX_ALIGNMENT:
+                raise SchemaError(f"{where}: force_align must be a power of two no larger than {MAX_ALIGNMENT}")
+
     def set_default(self, f: Field, fd: _FieldDecl, where: str) -> None:
         bt = f.type.base
         raw = fd.default
@@ -648,8 +794,9 @@ class _Resolver:
             if f.key and bt == BaseType.STRING:
                 f.required = True  # flatc: string keys are implicitly required
             f.optional = not f.required
-            if raw not in (None, "null", "[]") and not (bt == BaseType.STRING and raw.startswith('"')):
-                raise SchemaError(f"{where}: default values are only allowed on scalar fields")
+            if raw is not None:
+                # flatc: "Default values for strings and vectors are not supported"
+                raise SchemaError(f"{where}: default values for strings, vectors and tables are not supported")
             return
         if raw == "null":
             f.optional = True
@@ -659,40 +806,59 @@ class _Resolver:
             return
         if raw is None:
             f.default = False if bt == BaseType.BOOL else (0.0 if bt.is_float else 0)
-            return
-        f.default = _parse_scalar_literal(raw, bt, f.type.enum, where)
+        else:
+            f.default = _parse_scalar_literal(raw, bt, f.type.enum, where)
+        enum = f.type.enum
+        if enum is not None and not enum.is_union and not enum.bit_flags and f.default not in enum.by_value:
+            # as flatc: the (implicit or explicit) default must be a member
+            raise SchemaError(f"{where}: default value of {f.default} for field {f.name} is not part of "
+                              f"enum {enum.name}")
+
+
+_INT_LITERAL = re.compile(r"[-+]?(0[xX][0-9a-fA-F]+|[0-9]+)")
+_HEX_FLOAT = re.compile(r"[-+]?0[xX](?:[0-9a-fA-F]+\.?[0-9a-fA-F]*|\.[0-9a-fA-F]+)(?:[pP][-+]?[0-9]+)?")
 
 
 def _parse_scalar_literal(raw: str, bt: BaseType, enum: Enum | None, where: str) -> Any:
+    """A scalar default, with flatc's rules for which literals fit which type."""
     text = raw[1:-1] if raw.startswith('"') else raw
+    is_int = _INT_LITERAL.fullmatch(text) is not None and len(text) <= 40
     if bt == BaseType.BOOL:
         if text in ("true", "false"):
             return text == "true"
-        try:
-            return bool(int(text, 0))
-        except ValueError:
-            raise SchemaError(f"{where}: bad bool default {raw!r}") from None
+        if is_int:
+            v = int(text, 0)
+            if 0 <= v <= 255:          # flatc parses bool defaults as ubyte
+                return bool(v)
+            raise SchemaError(f"{where}: invalid number {text!r}, constant does not fit [0; 255]")
+        raise SchemaError(f"{where}: bad bool default {raw!r}")
+    if text in ("true", "false"):
+        raise SchemaError(f"{where}: enum values need to be qualified by an enum type: {text} "
+                          "is only a bool default")
     if bt.is_float:
         low = text.lower().lstrip("+")
         if low in ("inf", "infinity", "-inf", "-infinity", "nan", "-nan"):
             return float(low.replace("infinity", "inf"))
+        if _HEX_FLOAT.fullmatch(text):
+            if "p" not in text.lower():
+                raise SchemaError(f"{where}: invalid number {text!r}: the exponent suffix of hexadecimal "
+                                  "floating-point literals is mandatory")
+            return float.fromhex(text)
         try:
-            return float(int(text, 0)) if re.fullmatch(r"[-+]?0[xX][0-9a-fA-F]+", text) else float(text)
+            return float(text)
         except ValueError:
             raise SchemaError(f"{where}: bad float default {raw!r}") from None
-    try:
+    if is_int:
         value = int(text, 0)
-    except ValueError:
-        if enum is None:
-            if text in ("true", "false"):
-                return int(text == "true")
-            raise SchemaError(f"{where}: bad integer default {raw!r}") from None
+    elif enum is not None and re.fullmatch(r"[A-Za-z_][\w.]*( +[A-Za-z_][\w.]*)*", text):
         value = 0
         for part in text.split():
             name = part.rpartition(".")[2]
             if name not in enum.by_name:
                 raise SchemaError(f"{where}: {name!r} is not a value of {enum.name}")
             value |= enum.by_name[name].value
+    else:
+        raise SchemaError(f"{where}: bad integer default {raw[:40]!r}")
     lo, hi = INT_RANGE[bt]
     if not lo <= value <= hi:
         raise SchemaError(f"{where}: default {value} out of range for {bt.name.lower()}")
@@ -752,14 +918,19 @@ def _layout_one(obj: Object) -> None:
         prev = f
     if "force_align" in obj.attributes:
         fa = _to_int(obj.attributes["force_align"], obj.name, "force_align")
-        if fa & (fa - 1) or fa < minalign or fa > 256:
-            raise SchemaError(f"{obj.name}: force_align must be a power of two >= {minalign}")
+        if fa < 1 or fa & (fa - 1) or fa < minalign or fa > MAX_ALIGNMENT:
+            raise SchemaError(f"{obj.name}: unexpected force_align value {fa}, alignment must be a power "
+                              f"of two from the type's natural alignment {minalign} to {MAX_ALIGNMENT}")
         minalign = fa
     pad = (-size) % minalign
     if prev is not None:
         prev.padding += pad
     obj.bytesize = size + pad
     obj.minalign = minalign
+    if obj.bytesize > 0xFFFF:
+        # reflection stores field offsets as uint16: flatc accepts such structs
+        # but writes wrapped (wrong) offsets to .bfbs, so refuse them
+        raise SchemaError(f"struct {obj.name} is {obj.bytesize} bytes; structs must fit in 65535 bytes")
 
 
 def _check_nested(self: _Resolver, obj: Object, d: _ObjDecl) -> None:
@@ -892,6 +1063,31 @@ def _docs(lines: list[str], indent: str) -> str:
     return "".join(f"{indent}///{part}\n" for d in lines for part in (d.splitlines() or [""]))
 
 
+def _declaration_order(schema: Schema) -> list:
+    """An order flatc (and our parser) accept: enums and unions before
+    everything (they must be declared before use), then structs with the
+    structs they contain first, then tables (which may reference anything)."""
+    enums = sorted(schema.enums.values(), key=lambda e: e.name)
+    structs: list[Object] = []
+    done: set[str] = set()
+    for start in sorted((o for o in schema.objects.values() if o.is_struct), key=lambda o: o.name):
+        work: list[tuple[Object, bool]] = [(start, False)]
+        while work:                         # iterative post-order DFS
+            o, ready = work.pop()
+            if o.name in done:
+                continue
+            if ready:
+                done.add(o.name)
+                structs.append(o)
+                continue
+            work.append((o, True))
+            for f in reversed(o.fields):
+                if f.type.item == BaseType.OBJ and f.type.ref.name not in done:
+                    work.append((f.type.ref, False))
+    tables = sorted((o for o in schema.objects.values() if not o.is_struct), key=lambda o: o.name)
+    return [*enums, *structs, *tables]
+
+
 def render(schema: Schema) -> str:
     """Render a schema as .fbs text (round-trips through :func:`parse_fbs`).
 
@@ -924,15 +1120,13 @@ def render(schema: Schema) -> str:
         out.append(f'attribute "{a}";\n')
     if user_attrs:
         out.append("\n")
-    decls = sorted([*schema.enums.values(), *schema.objects.values()],
-                   key=lambda d: (d.name.rpartition(".")[0], isinstance(d, Object), d.name))
-    ns = None
+    decls = _declaration_order(schema)
+    ns = ""
     for d in decls:
         dns = d.name.rpartition(".")[0]
         if dns != ns:
             ns = dns
-            if ns:
-                out.append(f"namespace {ns};\n\n")
+            out.append(f"namespace {ns};\n\n" if ns else "namespace ;\n\n")
         out.append(_docs(d.documentation, ""))
         if isinstance(d, Enum):
             if d.is_union:
@@ -983,7 +1177,8 @@ def render(schema: Schema) -> str:
         out.append("}\n\n")
     if schema.root is not None:
         if ns != schema.root.namespace:
-            out.append(f"namespace {schema.root.namespace};\n\n")
+            rns = schema.root.namespace
+            out.append(f"namespace {rns};\n\n" if rns else "namespace ;\n\n")
         out.append(f"root_type {schema.root.short_name};\n")
     if schema.file_ident:
         out.append(f"file_identifier {_quote(schema.file_ident)};\n")

@@ -120,14 +120,20 @@ class _Verifier:
             self.fail(path, f"nesting deeper than {self.max_depth}")
         self.check(pos, 4, 4, path, f"table {obj.short_name}")
         vt = pos - _i32(self.buf, pos)[0]
-        self.check(vt, 4, 2, path, "vtable")
-        vtlen, tlen = _u16(self.buf, vt)[0], _u16(self.buf, vt + 2)[0]
-        if vtlen < 4 or vtlen % 2:
+        # As flatc: the vtable is 2-byte aligned, its size even and it fits;
+        # a 0- or 2-byte vtable just means "no fields present".
+        self.check(vt, 2, 2, path, "vtable")
+        vtlen = _u16(self.buf, vt)[0]
+        if vtlen % 2:
             self.fail(path, f"vtable size {vtlen} is invalid")
-        self.check(vt, vtlen, 2, path, "vtable")
-        if tlen < 4:
-            self.fail(path, f"table size {tlen} is invalid")
+        self.check(vt, vtlen, 1, path, "vtable")
+        tlen = 0
         if self.strict_size:
+            if vtlen < 4:
+                self.fail(path, f"vtable size {vtlen} has no table size")
+            tlen = _u16(self.buf, vt + 2)[0]
+            if tlen < 4:
+                self.fail(path, f"table size {tlen} is invalid")
             self.check(pos, tlen, 1, path, "table data")
         buf = self.buf
         for f in obj.fields:
@@ -149,7 +155,7 @@ class _Verifier:
                     self.enum_value(f, struct.unpack_from("<" + _fmt(base), buf, fpos)[0], fpath)
                 elif base == BaseType.UTYPE and t.enum is not None:
                     ut = buf[fpos]
-                    if ut not in t.enum.by_value:
+                    if self.strict_enums and ut not in t.enum.by_value:
                         self.fail(fpath, f"union type {ut} is not a member of {t.enum.name}")
                 continue
             if base == BaseType.OBJ and t.ref.is_struct:
@@ -166,6 +172,13 @@ class _Verifier:
             elif base == BaseType.UNION:
                 self.union(obj, f, pos, vt, vtlen, fpos, fpath, depth)
             elif base == BaseType.VECTOR:
+                if t.element == BaseType.UTYPE:
+                    # union type vector: its value vector must be present too
+                    vf = obj.fields_by_name.get(f.name[:-5]) if f.name.endswith("_type") else None
+                    if vf is not None and vf.type.element == BaseType.UNION:
+                        vo = _u16(buf, vt + vf.offset)[0] if vf.offset < vtlen else 0
+                        if not vo:
+                            self.fail(fpath, "union type vector without its value vector")
                 self.vector(obj, f, pos, vt, vtlen, self.deref(fpos, fpath, "vector"), fpath, depth)
             else:
                 self.fail(fpath, f"unsupported field type {base.name}")
@@ -180,14 +193,19 @@ class _Verifier:
         tf = self._union_type_at(obj, f, pos, vt, vtlen)
         o = _u16(self.buf, vt + tf.offset)[0] if tf.offset < vtlen else 0
         ut = self.buf[pos + o] if o else 0
-        if ut == 0:
-            self.fail(fpath, "union value present but its type is NONE")
-        self.union_member(f.type.ref, ut, self.deref(fpos, fpath, "union value"), fpath, depth)
+        target = self.deref(fpos, fpath, "union value")   # flatc checks the offset itself
+        # With type NONE the value is ignored (readers return None), as flatc does.
+        if ut != 0:
+            self.union_member(f.type.ref, ut, target, fpath, depth)
 
     def union_member(self, union, ut: int, target: int, path: str, depth: int) -> None:
         member = union.by_value.get(ut)
         if member is None:
-            self.fail(path, f"union type {ut} is not a member of {union.name}")
+            # A member added by a newer schema: readers return None for it,
+            # so (like flatc) it is accepted; strict_enums flags it.
+            if self.strict_enums:
+                self.fail(path, f"union type {ut} is not a member of {union.name}")
+            return
         mt = member.union_type
         if mt is None or mt.base == BaseType.NONE:
             return
@@ -206,7 +224,8 @@ class _Verifier:
         start = vp + 4
         if el.is_scalar:
             size = SCALAR_SIZE[el]
-            self.check(start, n * size, size, fpath, "vector data")
+            # As flatc: only the length prefix must be aligned, not the elements.
+            self.check(start, n * size, 1, fpath, "vector data")
             if self.strict_enums and t.enum is not None and el != BaseType.UTYPE:
                 for i, v in enumerate(struct.unpack_from(f"<{n}{_fmt(el)}", self.buf, start)):
                     self.enum_value(f, v, f"{fpath}[{i}]")
@@ -225,7 +244,7 @@ class _Verifier:
                 self.refs += sub.refs
             return
         if el == BaseType.OBJ and t.ref.is_struct:
-            self.check(start, n * t.ref.bytesize, t.ref.minalign, fpath, "vector data")
+            self.check(start, n * t.ref.bytesize, 1, fpath, "vector data")
             if self.strict_enums:
                 for i in range(n):
                     self.struct_(t.ref, start + i * t.ref.bytesize, f"{fpath}[{i}]")
@@ -262,8 +281,8 @@ class _Verifier:
                 self.fail(fpath, f"union vector has {n} values but {tn} types")
             for i in range(n):
                 ut = self.buf[tvp + 4 + i]
-                if ut == 0:
-                    continue
+                if ut == 0 or (ut not in t.ref.by_value and not self.strict_enums):
+                    continue     # NONE / unknown member: never followed, as flatc
                 p = start + 4 * i
                 self.union_member(t.ref, ut, self.deref(p, f"{fpath}[{i}]", "union value"),
                                   f"{fpath}[{i}]", depth)
