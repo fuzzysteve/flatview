@@ -99,8 +99,10 @@ library itself has no runtime dependencies; keep it that way.
 ## Security rules (tests in `tests/test_security.py`)
 
 - Treat `.bfbs` files and buffers as untrusted. **Never interpolate schema-derived
-  text into generated source** in `_todict.py`. Use indexes, `repr()`, or `self.const()`
-  values only; integers come from struct unpacking.
+  text into generated source** in `_todict.py` or the compiled encoder and verifier. Use
+  indexes, `repr()`, or `const()` values only; integers come from struct unpacking and
+  pass `_int()`. Compiled-code caches are keyed by the `Object` itself, never its name:
+  `root=` may be another schema's table of the same name.
 - `load_bfbs` must keep verifying the buffer against `reflection.fbs`, rejecting
   non-identifier names, and running `validate()` (layout sanity) before returning.
 - Every new kind of offset the verifier follows must go through `deref()`, so it counts

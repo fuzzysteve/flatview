@@ -645,7 +645,7 @@ def table_encoder(schema: Schema, obj: Object, strict: bool, force_defaults: boo
     source: names and fields are namespace constants, numbers pass _int().
     """
     cache = schema.__dict__.setdefault("_encoders", {})
-    key = (obj.name, bool(strict), bool(force_defaults))
+    key = (obj, bool(strict), bool(force_defaults))   # by identity, as _todict.converter
     fn = cache.get(key)
     if fn is None:
         fn = cache[key] = _compile_table(obj, bool(strict), bool(force_defaults))

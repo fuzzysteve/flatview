@@ -889,3 +889,23 @@ def test_bfbs_union_vector_needs_a_type_vector(tmp_path):
     src = "table M { x: int; } union U { M } table T { v: [U]; } root_type T;"
     with pytest.raises(SchemaError, match="without a matching v_type field"):
         flatview.load_bfbs(_crafted_bfbs(tmp_path, src, scalarise))
+
+
+# -- compiled code is per table object, not per table name ----------------------
+
+def test_compiled_caches_never_mix_tables_of_the_same_name():
+    # root= accepts another schema's Object; caches keyed by name handed that
+    # table's compiled converter/encoder/verifier to this schema's own table
+    a = parse_fbs("table X { s: string; } root_type X;")
+    b = parse_fbs("table X { n: int; } root_type X;")
+    data_b = b.encode({"n": 12345})
+    a.verify(data_b, b.root)                                   # valid as b.X ...
+    assert a.read(data_b, b.root)._asdict() == {"n": 12345}
+    assert a.encode({"n": 7}, b.root) == b.encode({"n": 7})
+    with pytest.raises(VerificationError, match="offset to string"):
+        a.verify(data_b)                                       # ... but not as a.X
+    data_a = a.encode({"s": "hi"})
+    assert a.read(data_a)._asdict() == {"s": "hi"}            # a.X's own converter
+    assert b.read(data_b)._asdict() == {"n": 12345}
+    with pytest.raises(flatview.EncodeError, match="unknown field"):
+        a.encode({"n": 7})                                     # a.X's own encoder

@@ -385,7 +385,7 @@ def table_verifier(schema: Schema, obj: Object, align: bool, strict_size: bool, 
     """
     opts = (bool(align), bool(strict_size), bool(utf8), bool(check_sorted), bool(strict_enums))
     cache = schema.__dict__.setdefault("_verifiers", {})
-    key = (obj.name, *opts)
+    key = (obj, *opts)       # by identity, as _todict.converter
     fn = cache.get(key)
     if fn is None:
         fn = cache[key] = _compile_table(obj, *opts)
@@ -481,7 +481,7 @@ def _compile_table(obj: Object, align: bool, strict_size: bool, utf8: bool, chec
         name = const(f.name)
         here = f"(chain, {name})"
         lines.append(f"    o = e[{_int(f.id)}]")
-        general = [f"    if o or {f.required!r}:",
+        general = [f"    if o or {bool(f.required)}:",       # True/False, whatever the attribute holds
                    f"        V.field(OBJ, {const(f)}, pos, vt, vtlen, tlen, _fmt({here}), depth)"]
         missing = [f"    else:", f"        {slow}"] if f.required else []
         ns["_fmt"] = _fmt
