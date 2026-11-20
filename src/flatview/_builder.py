@@ -568,9 +568,12 @@ class _Encoder:
             # paths use the caller's index, not the post-sort position
             if self.tables is None:
                 fn = self.fns.get(sub) or self.fn_for(sub)
-                table = self.table
-                offs = [fn(self, x, f"{path}[{i}]") if type(x) is dict else table(sub, x, f"{path}[{i}]")
-                        for i, x in indexed]
+                # a loop, not a comprehension: before Python 3.12 a comprehension is
+                # one more frame per nesting level
+                offs = []
+                for i, x in indexed:
+                    offs.append(fn(self, x, f"{path}[{i}]") if type(x) is dict
+                                else self.table(sub, x, f"{path}[{i}]"))
             else:
                 offs = [self.table(sub, x, f"{path}[{i}]") for i, x in indexed]
             return self.b.create_offset_vector(offs)
