@@ -1,4 +1,5 @@
 import json
+import math
 
 import pytest
 
@@ -102,3 +103,16 @@ def test_schema_output(hostile_files, capsys, monkeypatch, tty):
         again = flatview.parse_fbs(out)
         assert again["T"].documentation == [f" doc {HOSTILE.split(chr(0x2028))[0]}",
                                            HOSTILE.split(chr(0x2028))[1]]
+
+
+def test_dump_output_encodes_again(tmp_path, capsys):
+    # dump writes non-finite floats as "nan"/"inf" strings (JSON has none); encode must take them
+    import flatview
+    (tmp_path / "s.fbs").write_text("table T { a: double; b: float; c: [double]; } root_type T;")
+    s = flatview.load_schema(tmp_path / "s.fbs")
+    (tmp_path / "x.bin").write_bytes(s.encode({"a": float("nan"), "b": float("-inf"), "c": [float("inf"), 1.5]}))
+    assert main(["dump", str(tmp_path / "x.bin"), "-s", str(tmp_path / "s.fbs")]) == 0
+    (tmp_path / "x.json").write_text(capsys.readouterr().out)
+    assert main(["encode", str(tmp_path / "s.fbs"), str(tmp_path / "x.json"), "-o", str(tmp_path / "y.bin")]) == 0
+    again = s.read((tmp_path / "y.bin").read_bytes())
+    assert math.isnan(again.a) and again.b == float("-inf") and again.c.tolist() == [float("inf"), 1.5]

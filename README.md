@@ -123,9 +123,9 @@ dicts is there for scale. Every output is decoded again and checked.
 
 | File | flatview, from dicts | flatview, from a view | official `Pack` | `json.dumps` | speed-up |
 |---|---|---|---|---|---|
-| types.fb (150 MB) | 1.51 s | 2.31 s | 4.33 s | 0.57 s | 2.9× |
-| typeDogma.fb (14 MB) | 1.60 s | 2.36 s | 4.46 s | 0.31 s | 2.8× |
-| mapSolarSystems.fb (3 MB) | 0.29 s | 0.37 s | 0.67 s | 0.05 s | 2.3× |
+| types.fb (150 MB) | 1.47 s | 2.30 s | 4.36 s | 0.59 s | 3.0× |
+| typeDogma.fb (14 MB) | 1.56 s | 2.34 s | 4.54 s | 0.31 s | 2.9× |
+| mapSolarSystems.fb (3 MB) | 0.29 s | 0.37 s | 0.66 s | 0.05 s | 2.3× |
 
 The encoder compiles one function per table, much as the converters do:
 in-range values of the expected type take straight-line code, and anything
@@ -380,14 +380,16 @@ uv run python fuzz/explain.py schema.fbs buf.bin      # where flatc's verifier r
 FLATVIEW_ORACLE=1 uv run pytest -m oracle             # short verifier fuzz as a test
 ```
 
-The encoder fuzzer generates random schemas (enums and bit flags, unions,
-structs with arrays, optional scalars, defaults, keyed vectors) and edge-case
-values. Every buffer flatview encodes must pass flatc's verifier and print
-the same, and every buffer flatc encodes must read back to the same value.
-It doesn't yet generate vectors of unions, nested flatbuffers or string
-union members. Elements with *equal* keys may come back in a different order
-from flatc (FlatBuffers leaves that unspecified), and flatc drops the sign
-of a `-0.0` that equals a `0.0` default. The comparison allows for both.
+The encoder fuzzer generates random schemas (enums and bit flags, unions
+with table, struct and string members, vectors of unions, nested
+flatbuffers, structs with arrays, optional scalars, defaults, keyed vectors)
+and edge-case values. Every buffer flatview encodes must pass flatc's
+verifier and print the same, and every buffer flatc encodes must read back
+to the same value. Elements with *equal* keys may come back in a different
+order from flatc (FlatBuffers leaves that unspecified), and flatc drops the
+sign of a `-0.0` that equals a `0.0` default. The comparison allows for both.
+flatc's JSON parser rejects `nan` inside a nested flatbuffer (`inf` is
+fine), so nested values in the fuzzer are NaN-free.
 
 The verifier accepts exactly what flatc's verifier accepts and decodes
 identically, except where flatview is deliberately stricter:

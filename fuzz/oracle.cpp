@@ -23,6 +23,8 @@ int main(int argc, char **argv) {
   flatbuffers::IDLOptions opts;
   opts.strict_json = true;
   opts.indent_step = -1;
+  // as flatc -b / --json: struct and string union members are allowed
+  opts.lang_to_generate = flatbuffers::IDLOptions::kBinary | flatbuffers::IDLOptions::kJson;
   flatbuffers::Parser parser(opts);
   const char *include_dirs[] = {argv[2], nullptr};
   if (!parser.Parse(schema.c_str(), include_dirs, argv[1])) {

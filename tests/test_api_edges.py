@@ -1,6 +1,7 @@
 """API edge cases: size-prefixed verified reads, identifiers with an explicit
 root, encoder errors, struct hashing, malformed buffers read without verify."""
 
+import math
 import struct
 
 import pytest
@@ -112,3 +113,63 @@ def test_union_vector_without_types_same_error_in_both_decoders():
         s.read(data).v
     with pytest.raises(FlatBufferError):
         s.read(data)._asdict()
+
+
+# -- encoder limits --------------------------------------------------------------
+
+DEEP = parse_fbs("table N { n: N; ns: [N]; v: int; } root_type N;")
+
+
+def _nest(depth: int, vector: bool) -> dict:
+    d = {"v": 0}
+    for i in range(depth):
+        d = {"ns": [d], "v": i} if vector else {"n": d, "v": i}
+    return d
+
+
+@pytest.mark.parametrize("vector,depth", [(False, 900), (True, 450)])
+def test_deep_nesting_encodes(vector, depth):
+    # the compiled encoder had cut the reachable depth (400 failed; 480 worked before it)
+    data = DEEP.encode(_nest(depth, vector))
+    node, n = DEEP.read(data), 0
+    while node is not None:
+        node = node.ns[0] if vector and node.ns else (None if vector else node.n)
+        n += 1
+    assert n == depth + 1
+
+
+def test_too_deep_is_an_encode_error():
+    with pytest.raises(EncodeError, match="nested too deeply"):
+        DEEP.encode(_nest(5000, False))
+
+
+BIG = parse_fbs("struct B { a: [ubyte:40000]; } table T { x: B; y: B; } root_type T;")
+
+
+@pytest.mark.parametrize("wide", [False, True])
+def test_table_over_64k_is_an_encode_error(monkeypatch, wide):
+    import flatview._builder as fb
+    if wide:                                   # the field-by-field path too
+        monkeypatch.setattr(fb, "WIDE_TABLE", 0)
+        BIG.__dict__.pop("_encoders", None)
+    v = {"a": [0] * 40000}
+    with pytest.raises(EncodeError, match=r"table T: 80,0\d\d bytes of inline data"):
+        BIG.encode({"x": v, "y": v})
+    BIG.__dict__.pop("_encoders", None)
+    assert BIG.read(BIG.encode({"x": v})).x.a[0] == 0       # one struct fits
+
+
+@pytest.mark.parametrize("text", ["nan", "NaN", "-nan", "inf", "+inf", "-inf", "Infinity", "-infinity"])
+def test_non_finite_float_strings(text):
+    s = parse_fbs("table T { d: double; f: float; v: [double]; } root_type T;")
+    root = s.read(s.encode({"d": text, "f": text, "v": [text]}))
+    want = float(text)
+    for got in (root.d, root.f, root.v[0]):
+        assert (math.isnan(got) and math.isnan(want)) or got == want
+
+
+def test_other_strings_are_still_not_floats():
+    s = parse_fbs("table T { d: double; } root_type T;")
+    for bad in ("1.5", "nope", ""):
+        with pytest.raises(EncodeError, match="expected a number"):
+            s.encode({"d": bad})

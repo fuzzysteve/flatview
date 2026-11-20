@@ -29,6 +29,10 @@ class EncodeError(ValueError):
         super().__init__(f"{path or '<root>'}: {msg}")
 
 
+class TableTooLarge(ValueError):
+    """A table's inline fields (or its vtable) exceed the format's 64 KB limit."""
+
+
 class Builder:
     """Low-level back-to-front FlatBuffer builder (bytes grow towards the front)."""
 
@@ -207,6 +211,9 @@ class Builder:
 
 _pack_u32 = struct.Struct("<I").pack_into
 
+#: non-finite float spellings accepted from text, e.g. ``flatview dump`` output
+_NONFINITE = frozenset(f"{sign}{word}" for sign in ("", "+", "-") for word in ("nan", "inf", "infinity"))
+
 #: table layouts by field pattern, see _table_layout (bounded: cleared when full)
 _LAYOUTS: dict[tuple, tuple] = {}
 
@@ -238,6 +245,11 @@ def _table_layout(key: tuple) -> tuple:
     objr = r
     nslots = max(locs) + 1 if locs else 0
     entries = [objr - locs[f] if f in locs else 0 for f in range(nslots)]
+    # vtable entries are uint16: a table's inline data and its vtable must fit
+    if objr > 0xFFFF:
+        raise TableTooLarge(f"{objr:,} bytes of inline data; a table holds at most 65,535")
+    if 4 + 2 * nslots > 0xFFFF:
+        raise TableTooLarge(f"field id {nslots - 1} needs a vtable over 65,535 bytes")
     vt = struct.pack(f"<{2 + nslots}H", 4 + 2 * nslots, objr, *entries)
     fmt = ["<i"]
     pos = 4
@@ -285,6 +297,8 @@ class _Encoder:
                 return bool(v)
             raise EncodeError(path, f"expected bool, got {v!r}")
         if base.is_float:
+            if isinstance(v, str) and v.strip().lower() in _NONFINITE:
+                return float(v)                  # as flatc's JSON: nan, inf, -inf, infinity
             if isinstance(v, bool) or not isinstance(v, (int, float)):
                 raise EncodeError(path, f"expected a number, got {v!r}")
             try:
@@ -389,8 +403,13 @@ class _Encoder:
             v = self.as_mapping(obj, v, path)
         fn = self.fns.get(obj)
         if fn is None:
-            fn = self.fns[obj] = table_encoder(self.schema, obj, self.strict, self.force_defaults)
+            fn = self.fn_for(obj)
         return fn(self, v, path)
+
+    def fn_for(self, obj: Object):
+        """The compiled encoder for ``obj`` (cached on the encoder)."""
+        fn = self.fns[obj] = table_encoder(self.schema, obj, self.strict, self.force_defaults)
+        return fn
 
     def as_mapping(self, obj: Object, v: Any, path: str) -> Mapping:
         from ._reader import TableView
@@ -411,7 +430,10 @@ class _Encoder:
         items: list[tuple[int, str, Any, int]] = []
         for f in obj.fields:
             self.field(obj, f, v, items, path)
-        return self.b.table(items)
+        try:
+            return self.b.table(items)
+        except TableTooLarge as e:
+            raise EncodeError(path, f"table {obj.name}: {e}") from None
 
     def check_known(self, obj: Object, v: Mapping, path: str) -> None:
         unknown = set(v) - set(obj.fields_by_name)
@@ -544,7 +566,13 @@ class _Encoder:
             if self.sort_keys and sub.key_field is not None:
                 indexed = self._sorted_by_key(sub, indexed, path)
             # paths use the caller's index, not the post-sort position
-            offs = [self.table(sub, x, f"{path}[{i}]") for i, x in indexed]
+            if self.tables is None:
+                fn = self.fns.get(sub) or self.fn_for(sub)
+                table = self.table
+                offs = [fn(self, x, f"{path}[{i}]") if type(x) is dict else table(sub, x, f"{path}[{i}]")
+                        for i, x in indexed]
+            else:
+                offs = [self.table(sub, x, f"{path}[{i}]") for i, x in indexed]
             return self.b.create_offset_vector(offs)
         if el == BaseType.UNION:
             types = parent.get(f.name + "_type")
@@ -621,9 +649,12 @@ def table_encoder(schema: Schema, obj: Object, strict: bool, force_defaults: boo
     return fn
 
 
-def _mask_layout(cache: dict, descs: tuple, mask: int) -> tuple:
+def _mask_layout(cache: dict, descs: tuple, mask: int, obj: Object, path: str) -> tuple:
     """Layout for the fields whose bits are set in ``mask`` (bit j = field j)."""
-    lay = _table_layout(tuple(d for j, d in enumerate(descs) if mask >> j & 1))
+    try:
+        lay = _table_layout(tuple(d for j, d in enumerate(descs) if mask >> j & 1))
+    except TableTooLarge as e:
+        raise EncodeError(path, f"table {obj.name}: {e}") from None
     if len(cache) >= 1024:          # bounded, whatever mix of fields the data has
         cache.clear()
     cache[mask] = lay
@@ -653,7 +684,8 @@ def _compile_table(obj: Object, strict: bool, force_defaults: bool):
     ns["LAYOUTS"] = {}
     ns["layout"] = _mask_layout
     descs = []
-    lines += ["    vals = []", "    ap = vals.append", "    get = v.get", "    m = 0"]
+    lines += ["    vals = []", "    ap = vals.append", "    get = v.get", "    m = 0",
+              "    fns = enc.fns", "    direct = enc.tables is None"]
     for j, f in enumerate(obj.fields):
         t, base = f.type, f.type.base
         fid = _int(f.id)
@@ -694,7 +726,14 @@ def _compile_table(obj: Object, strict: bool, force_defaults: bool):
         elif base == BaseType.STRING:
             body = [f"        ap(enc.string_field(x, path, {name})); m |= {bit}"]
         elif base == BaseType.OBJ and not t.ref.is_struct:
-            body = [f"        ap(enc.table({const(t.ref)}, x, fp(path, {name}))); m |= {bit}"]
+            sub = const(t.ref)
+            # a plain dict goes straight to the child's compiled encoder: one
+            # Python frame per nesting level, so deep data fits the recursion limit
+            body = [f"        if type(x) is dict and direct:",
+                    f"            ap((fns.get({sub}) or enc.fn_for({sub}))(enc, x, fp(path, {name})))",
+                    f"        else:",
+                    f"            ap(enc.table({sub}, x, fp(path, {name})))",
+                    f"        m |= {bit}"]
         elif base == BaseType.VECTOR:
             body = [f"        ap(enc.vector(OBJ, {const(f)}, x, v, fp(path, {name}))); m |= {bit}"]
         else:
@@ -710,7 +749,7 @@ def _compile_table(obj: Object, strict: bool, force_defaults: bool):
     ns["DESCS"] = tuple(descs)
     lines += ["    lay = LAYOUTS.get(m)",
               "    if lay is None:",
-              "        lay = layout(LAYOUTS, DESCS, m)",
+              "        lay = layout(LAYOUTS, DESCS, m, OBJ, path)",
               "    return enc.b.write_table(lay, vals)"]
     exec(compile("\n".join(lines) + "\n", "<flatview encoder>", "exec"), ns)
     return ns["encode_table"]
@@ -745,7 +784,12 @@ def _encode(schema: Schema, value: Any, root: str | Object | None, *,
     b = Builder(initial_size)
     enc = _Encoder(schema, b, sort_keys=sort_keys, share_strings=share_strings,
                    force_defaults=force_defaults, strict=strict, share_tables=share_tables)
-    root_off = enc.table(obj, value, "")
+    try:
+        root_off = enc.table(obj, value, "")
+    except RecursionError:
+        raise EncodeError("", "data nested too deeply to encode (Python's recursion limit); "
+                          "FlatBuffers verifiers reject deep nesting anyway (flatc's default "
+                          "limit is 64)") from None
     ident: str | bytes | None
     if file_identifier is True:
         ident = schema.file_ident if root is None or obj is schema.root else None

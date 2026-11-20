@@ -100,9 +100,14 @@ class Gen:
             out.append(f"struct {sname} {{ " + " ".join(f"{n}: {t};" for n, t in fields) + " }")
         tnames = [self.name("T") for _ in range(r.randrange(1, 4))]
         self.unions: list[tuple[str, list[str]]] = []
-        if r.random() < 0.5:
+        if r.random() < 0.6:
             uname = self.name("U")
             members = r.sample(tnames, r.randrange(1, len(tnames) + 1))
+            if self.structs and r.random() < 0.4:          # struct members
+                members.append(r.choice(self.structs)[0])
+            if r.random() < 0.4:                           # string members
+                members.append(f"{self.name('Str')}: string")
+            r.shuffle(members)
             self.unions.append((uname, members))
             out.append(f"union {uname} {{ {', '.join(members)} }}")
         self.tables: dict[str, list[tuple[str, str, str]]] = {}
@@ -160,6 +165,10 @@ class Gen:
             return r.choice(tnames), ""
         if k < 0.74 and self.unions:
             return self.unions[0][0], ""
+        if k < 0.80 and self.unions:
+            return f"[{self.unions[0][0]}]", ""            # vector of unions
+        if k < 0.86:
+            return "[ubyte]", f' (nested_flatbuffer: "{r.choice(tnames)}")'
         inner = r.choice([self.scalar_name(), "string"] + [s[0] for s in self.structs] + tnames +
                          [e[0] for e in self.enums])
         return f"[{inner}]", ""
@@ -210,7 +219,7 @@ class Values:
         r = self.rng
         out = {}
         for f in obj.fields:
-            if f.deprecated or f.type.base == BaseType.UTYPE:
+            if f.deprecated or f.type.item == BaseType.UTYPE:
                 continue
             if f.required or r.random() < 0.6:
                 v = self.field(obj, f, depth)
@@ -241,12 +250,24 @@ class Values:
             if not members or depth >= 3:
                 return _SKIP
             m = r.choice(members)
-            return (_UNION, m.value, self.table(m.union_type.ref, depth + 1))
+            return (_UNION, m.value, self.member(m, depth))
         if base == BaseType.VECTOR:
             n = r.choice([0, 1, 2, 3, 5])
             el = t.element
+            nested = f.attributes.get("nested_flatbuffer")
+            if nested is not None:
+                if depth >= 3:
+                    return _SKIP
+                from flatview._reader import _resolve_in
+                # flatc's JSON parser rejects `nan` inside a nested flatbuffer
+                # (inf is fine), so keep NaN out of nested values
+                return _no_nan(self.table(_resolve_in(self.s, nested, obj.namespace), depth + 1))
             if el == BaseType.UNION:
-                return _SKIP
+                members = [v for v in t.ref.values if v.value != 0]
+                if not members or depth >= 3:
+                    return _SKIP
+                picked = [r.choice(members) for _ in range(n)]
+                return (_UNION, [m.value for m in picked], [self.member(m, depth) for m in picked])
             if el.is_scalar:
                 return [self.scalar(el, t.enum) for _ in range(n)]
             if el == BaseType.STRING:
@@ -264,6 +285,15 @@ class Values:
             return rows
         return _SKIP
 
+    def member(self, m, depth: int):
+        """A value for union member ``m``: a table, a struct or a string."""
+        ut = m.union_type
+        if ut.base == BaseType.STRING:
+            return self.rng.choice(STRINGS)
+        if ut.ref.is_struct:
+            return self.struct(ut.ref)
+        return self.table(ut.ref, depth + 1)
+
     def struct(self, obj) -> dict:
         out = {}
         for f in obj.fields:
@@ -278,6 +308,16 @@ class Values:
             else:
                 out[f.name] = self.scalar(t.base, t.enum)
         return out
+
+
+def _no_nan(v):
+    if isinstance(v, float) and math.isnan(v):
+        return 0.5
+    if isinstance(v, dict):
+        return {k: _no_nan(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_no_nan(x) for x in v]
+    return v
 
 
 _SKIP = object()
@@ -324,7 +364,19 @@ def key_of(obj, row: dict):
     return kf.default if k is None else k
 
 
-def expect_table(obj, v: dict) -> dict:
+def expect_member(schema, member, x):
+    ut = member.union_type
+    if ut.base == BaseType.STRING:
+        return x
+    return expect_struct(ut.ref, x) if ut.ref.is_struct else expect_table(schema, ut.ref, x)
+
+
+def nested_target(schema, obj, f):
+    from flatview._reader import _resolve_in
+    return _resolve_in(schema, f.attributes["nested_flatbuffer"], obj.namespace)
+
+
+def expect_table(schema, obj, v: dict) -> dict:
     out = {}
     for f in obj.fields:
         if f.deprecated:
@@ -343,13 +395,17 @@ def expect_table(obj, v: dict) -> dict:
         elif base == BaseType.STRING:
             out[f.name] = x
         elif base == BaseType.OBJ:
-            out[f.name] = expect_struct(t.ref, x) if t.ref.is_struct else expect_table(t.ref, x)
+            out[f.name] = expect_struct(t.ref, x) if t.ref.is_struct else expect_table(schema, t.ref, x)
         elif base == BaseType.UNION:
-            member = t.ref.by_value[v[f.name + "_type"]]
-            out[f.name] = expect_table(member.union_type.ref, x)
+            out[f.name] = expect_member(schema, t.ref.by_value[v[f.name + "_type"]], x)
         elif base == BaseType.VECTOR:
             el = t.element
-            if el.is_scalar:
+            if "nested_flatbuffer" in f.attributes:
+                out[f.name] = expect_table(schema, nested_target(schema, obj, f), x)
+            elif el == BaseType.UNION:
+                out[f.name] = [expect_member(schema, t.ref.by_value[ut], e)
+                               for ut, e in zip(v[f.name + "_type"], x)]
+            elif el.is_scalar:
                 out[f.name] = [expect_scalar(el, e) for e in x]
             elif el == BaseType.STRING:
                 out[f.name] = list(x)
@@ -359,7 +415,7 @@ def expect_table(obj, v: dict) -> dict:
                 rows = x
                 if t.ref.key_field is not None:
                     rows = sorted(rows, key=lambda row: key_of(t.ref, row))
-                out[f.name] = [expect_table(t.ref, e) for e in rows]
+                out[f.name] = [expect_table(schema, t.ref, e) for e in rows]
     return out
 
 
@@ -379,7 +435,14 @@ def _sort_key(k):
     return (1, 0, repr(k))
 
 
-def canon(obj, v):
+def canon_member(schema, member, x):
+    ut = member.union_type if member is not None else None
+    if ut is not None and ut.ref is not None and not ut.ref.is_struct:
+        return canon(schema, ut.ref, x)
+    return x
+
+
+def canon(schema, obj, v):
     """Order-insensitive form for keyed vectors: FlatBuffers leaves the order
     of elements with *equal* keys unspecified (flatc's sort doesn't keep input
     order; ours does), so sort each keyed vector by (key, content)."""
@@ -392,14 +455,16 @@ def canon(obj, v):
         if x is None:
             continue
         if t.base == BaseType.OBJ and not t.ref.is_struct:
-            out[f.name] = canon(t.ref, x)
+            out[f.name] = canon(schema, t.ref, x)
         elif t.base == BaseType.UNION:
-            tv = out.get(f.name + "_type")
-            member = t.ref.by_value.get(tv)
-            if member is not None and member.union_type is not None and member.union_type.ref is not None:
-                out[f.name] = canon(member.union_type.ref, x)
+            out[f.name] = canon_member(schema, t.ref.by_value.get(out.get(f.name + "_type")), x)
+        elif t.base == BaseType.VECTOR and "nested_flatbuffer" in f.attributes:
+            out[f.name] = canon(schema, nested_target(schema, obj, f), x)
+        elif t.base == BaseType.VECTOR and t.element == BaseType.UNION:
+            types = out.get(f.name + "_type") or []
+            out[f.name] = [canon_member(schema, t.ref.by_value.get(ut), e) for ut, e in zip(types, x)]
         elif t.base == BaseType.VECTOR and t.element == BaseType.OBJ and not t.ref.is_struct:
-            rows = [canon(t.ref, e) for e in x]
+            rows = [canon(schema, t.ref, e) for e in x]
             if t.ref.key_field is not None:
                 kf = t.ref.key_field.name
                 # numeric keys compare numerically (so -0.0 groups with 0.0); the
@@ -491,7 +556,7 @@ def run(seconds: float, seed: int, per_schema: int) -> int:
                 for _ in range(per_schema):
                     value = vg.table(root, 0)
                     stats["values"] += 1
-                    expected = canon(root, normalise(expect_table(root, value)))
+                    expected = canon(schema, root, normalise(expect_table(schema, root, value)))
                     # A. flatview round trip
                     try:
                         buf = schema.encode(value)
@@ -503,7 +568,7 @@ def run(seconds: float, seed: int, per_schema: int) -> int:
                     except flatview.VerificationError as e:
                         record("ours-output-fails-our-verify", str(e), text, value)
                         continue
-                    got = canon(root, normalise(schema.read(buf)._asdict(defaults=True, enums="value")))
+                    got = canon(schema, root, normalise(schema.read(buf)._asdict(defaults=True, enums="value")))
                     diff = same(got, expected)
                     if diff:
                         record("ours-roundtrip-differs", diff, text, value)
@@ -530,7 +595,7 @@ def run(seconds: float, seed: int, per_schema: int) -> int:
                     except flatview.VerificationError as e:
                         record("ours-rejects-flatc-buffer", str(e), text, value)
                         continue
-                    got = canon(root, normalise(schema.read(theirs)._asdict(defaults=True, enums="value")))
+                    got = canon(schema, root, normalise(schema.read(theirs)._asdict(defaults=True, enums="value")))
                     diff = same(got, expected)
                     if diff:
                         record("flatc-buffer-decodes-differently", diff, text, value)
