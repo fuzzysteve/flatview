@@ -45,7 +45,13 @@ library itself has no runtime dependencies; keep it that way.
   property per field, plus `Vector` subclasses (key lookup is on `TableVector`).
 - `_todict.py`: whole-tree conversion. It generates source for one converter function per
   table and mode and `exec`s it; `_asdict()` and `to_python()` go through it.
-- `_verify.py`: the verifier. `_builder.py`: the back-to-front builder and the
+- `_verify.py`: the verifier. It compiles one function per table and option set
+  (`table_verifier`) with the same safety rules as `_todict.py`. A compiled function must
+  accept exactly what `_Verifier.table_generic`/`field` accept; on any failed inline check
+  it calls `_Verifier.slow`, which resets the offset budget and re-verifies the table with
+  the general code, so errors are identical (`tests/test_verifier_compiled.py`). Paths are
+  lazy chains formatted by `_fmt` only on failure.
+  `_builder.py`: the back-to-front builder and the
   schema-driven encoder. The encoder compiles one function per table (`table_encoder`), with the
   same safety rules as `_todict.py` (names as namespace constants, numbers via `_int()`,
   `WIDE_TABLE` tables field by field). Its fast paths must give byte-identical output and
@@ -98,7 +104,8 @@ library itself has no runtime dependencies; keep it that way.
 - `load_bfbs` must keep verifying the buffer against `reflection.fbs`, rejecting
   non-identifier names, and running `validate()` (layout sanity) before returning.
 - Every new kind of offset the verifier follows must go through `deref()`, so it counts
-  against `max_refs` (amplification protection).
+  against `max_refs` (amplification protection). The compiled verifiers inline the same
+  check (one unit per offset, in the same order as the general code).
 - All decompression goes through `_io._decompress` with a size cap (`max_size`, default
   2 GiB).
 - `.fbs` includes resolve only inside `ctx.include_roots` (the main schema's directory

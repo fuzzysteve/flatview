@@ -279,6 +279,13 @@ float keys, which can't be ordered at all. `max_refs` bounds how
 many offsets are followed (default: buffer size / 4, the most a buffer
 without shared sub-objects can contain). See [Security](#security).
 
+The verifier compiles one function per table, as the converters and the
+encoder do, with the checks inline. If one fails, that table is verified
+again by the general code, so errors and paths are the general verifier's.
+Fully verifying the SDE's `types.fb` (150 MB) takes 0.95 s (2.04 s before);
+`typeDogma.fb` 0.83 s (2.09 s). Most of what is left is UTF-8 checking
+(`check_utf8=False`: 0.76 s for `types.fb`).
+
 ### Writing
 
 ```python
