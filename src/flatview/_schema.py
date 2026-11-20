@@ -377,6 +377,17 @@ class Schema:
         from ._builder import encode
         return encode(self, value, root, **kw)
 
+    def to_bfbs(self, *, comments: bool = True, builtins: bool = True) -> bytes:
+        """Serialise as a .bfbs binary schema, as ``flatc --schema -b`` writes.
+
+        comments: keep doc comments (flatc's ``--bfbs-comments``).
+        builtins: keep built-in attributes such as ``nested_flatbuffer`` and
+                  ``force_align`` (flatc's ``--bfbs-builtins``); without them
+                  the reloaded schema loses what they mean.
+        """
+        from ._bfbs import to_bfbs
+        return to_bfbs(self, comments=comments, builtins=builtins)
+
     def to_fbs(self) -> str:
         """Render the schema back to .fbs text."""
         from ._fbs import render

@@ -75,14 +75,14 @@ def load_bfbs(data: Any, source: str | None = None) -> Schema:
         objects.append(Object(ro.name, is_struct=ro.is_struct, minalign=ro.minalign,
                               bytesize=ro.bytesize, attributes=_attrs(ro.attributes),
                               documentation=_docs(ro.documentation),
-                              declaration_file=ro.declaration_file))
+                              declaration_file=ro.declaration_file or None))
     for re_ in raw_enums:
         if not _QUALIFIED.fullmatch(re_.name):
             raise SchemaError(f"invalid .bfbs: bad enum name {re_.name!r}")
         enums.append(Enum(re_.name, is_union=re_.is_union,
                           underlying=_base(re_.underlying_type.base_type, re_.name),
                           attributes=_attrs(re_.attributes), documentation=_docs(re_.documentation),
-                          declaration_file=re_.declaration_file))
+                          declaration_file=re_.declaration_file or None))
 
     def make_type(rt) -> Type:
         base = _base(rt.base_type, "a type")
@@ -289,3 +289,144 @@ def validate(schema: Schema) -> None:
                         fail(f"struct {sub.name} contains itself")
                     if state.get(sub.name) != 2:
                         work.append((sub, False))
+
+
+# --------------------------------------------------------------------------
+# Writing .bfbs
+
+#: flatc's SizeOf() for each base type (offsets are 4 bytes, NONE counts as 1).
+_SIZE_OF = {BaseType.NONE: 1, BaseType.STRING: 4, BaseType.VECTOR: 4, BaseType.OBJ: 4,
+            BaseType.UNION: 4, BaseType.ARRAY: 4, BaseType.VECTOR64: 8, **SCALAR_SIZE}
+
+_ADV_ARRAYS, _ADV_UNIONS, _ADV_OPTIONAL, _ADV_DEFAULTS = 1, 2, 4, 8
+
+
+def to_bfbs(schema: Schema, *, comments: bool = True, builtins: bool = True) -> bytes:
+    """Serialise ``schema`` as a .bfbs (a FlatBuffer of ``reflection.fbs``).
+
+    The output is what ``flatc --schema -b --bfbs-comments --bfbs-builtins``
+    writes for the same schema, apart from ``fbs_files`` (the include graph,
+    which the model doesn't keep) and services (likewise). ``comments=False,
+    builtins=False`` matches plain ``flatc --schema -b``; note that without
+    built-in attributes ``nested_flatbuffer``, ``force_align`` etc. are gone
+    when the file is loaded again.
+    """
+    from ._builder import _encode
+    from ._fbs import BUILTIN_ATTRIBUTES
+
+    # flatc: indices are positions in the name-sorted vectors (bytewise order)
+    objects = sorted(schema.objects.values(), key=lambda o: o.name.encode())
+    enums = sorted(schema.enums.values(), key=lambda e: e.name.encode())
+    oidx = {id(o): i for i, o in enumerate(objects)}
+    eidx = {id(e): i for i, e in enumerate(enums)}
+    root_dir = _project_root(schema)
+    features = 0
+
+    def attrs(d: dict[str, str]) -> list[dict] | None:
+        kvs = [{"key": k, "value": v} for k, v in sorted(d.items(), key=lambda kv: kv[0].encode())
+               if builtins or k not in BUILTIN_ATTRIBUTES]
+        return kvs or None
+
+    def docs(lines: list[str]) -> list[str] | None:
+        return list(lines) if comments and lines else None
+
+    def type_(base: BaseType, element: BaseType = BaseType.NONE, ref: Object | Enum | None = None,
+              fixed_length: int = 0) -> dict:
+        index = -1
+        if isinstance(ref, Object):
+            index = oidx[id(ref)]
+        elif isinstance(ref, Enum):
+            index = eidx[id(ref)]
+        element_size = _SIZE_OF[element]
+        if base == BaseType.VECTOR and element == BaseType.OBJ and ref.is_struct:
+            element_size = ref.bytesize
+        return {"base_type": int(base), "element": int(element), "index": index,
+                "fixed_length": fixed_length, "base_size": _SIZE_OF[base], "element_size": element_size}
+
+    def field(o: Object, f: Field) -> dict:
+        nonlocal features
+        t = f.type
+        if t.base == BaseType.ARRAY:
+            features |= _ADV_ARRAYS
+        if t.base == BaseType.VECTOR and t.element == BaseType.UNION:
+            features |= _ADV_UNIONS
+        if t.base.is_scalar and f.optional:
+            features |= _ADV_OPTIONAL
+        if (not o.is_struct and t.base in (BaseType.STRING, BaseType.VECTOR)
+                and not f.optional and not f.required):
+            features |= _ADV_DEFAULTS          # only a string/vector default makes these non-optional
+        d: dict[str, Any] = {
+            "name": f.name, "type": type_(t.base, t.element, t.ref, t.fixed_length),
+            "id": f.id, "offset": f.offset, "deprecated": f.deprecated, "required": f.required,
+            "key": f.key, "optional": f.optional, "padding": f.padding,
+            "attributes": attrs(f.attributes), "documentation": docs(f.documentation),
+        }
+        if t.base.is_integer and f.default is not None:
+            v = int(f.default)
+            d["default_integer"] = v - (1 << 64) if v >= 1 << 63 else v    # stored in a signed long
+        elif t.base.is_float and f.default is not None:
+            d["default_real"] = float(f.default)
+        return d
+
+    obj_dicts = {}
+    for o in objects:
+        obj_dicts[id(o)] = {
+            "name": o.name, "fields": [field(o, f) for f in o.fields], "is_struct": o.is_struct,
+            "minalign": o.minalign, "bytesize": o.bytesize, "attributes": attrs(o.attributes),
+            "documentation": docs(o.documentation),
+            "declaration_file": _declaration(o.declaration_file, root_dir),
+        }
+
+    def enum_val(e: Enum, v) -> dict:
+        ut = v.union_type if e.is_union and v.union_type is not None else None
+        return {"name": v.name, "value": v.value,
+                "union_type": type_(ut.base, ut.element, ut.ref) if ut is not None else type_(BaseType.NONE),
+                "attributes": attrs(v.attributes), "documentation": docs(v.documentation)}
+
+    enum_dicts = [{
+        "name": e.name, "values": [enum_val(e, v) for v in e.values], "is_union": e.is_union,
+        "underlying_type": type_(BaseType.UTYPE if e.is_union else e.underlying, ref=e),
+        "attributes": attrs(e.attributes), "documentation": docs(e.documentation),
+        "declaration_file": _declaration(e.declaration_file, root_dir),
+    } for e in enums]
+
+    value = {
+        "objects": [obj_dicts[id(o)] for o in objects],
+        "enums": enum_dicts,
+        "file_ident": schema.file_ident or "",
+        "file_ext": schema.file_ext or "",
+        # the same dict as in "objects": written once, both offsets point at it
+        "root_table": obj_dicts[id(schema.root)] if schema.root is not None else None,
+        "services": [],
+        "advanced_features": features,
+    }
+    return _encode(reflection_schema(), value, None, share_tables=True).output
+
+
+def _project_root(schema: Schema) -> str | None:
+    """Directory declaration files are written relative to (flatc's project
+    root, which defaults to the main schema's directory)."""
+    import os
+    src = schema.source
+    if src and not src.startswith("<") and os.path.isfile(src):
+        return os.path.dirname(os.path.abspath(src))
+    return None
+
+
+def _declaration(path: str | None, root: str | None) -> str | None:
+    """flatc's form: ``//`` + the path relative to the project root, ``/``-separated."""
+    import os
+    import posixpath
+    if not path or path.startswith("<"):
+        return None
+    if path.startswith("//"):
+        return path                         # already in flatc's form (loaded from a .bfbs)
+    rel = None
+    if root is not None:
+        try:
+            rel = os.path.relpath(os.path.abspath(path), root)
+        except ValueError:                  # e.g. another drive on Windows
+            rel = None
+    if rel is None:
+        rel = os.path.basename(path)
+    return "//" + posixpath.join(*rel.replace(os.sep, "/").split("/"))

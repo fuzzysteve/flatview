@@ -189,9 +189,13 @@ def _align_of(item) -> int:
 
 class _Encoder:
     def __init__(self, schema: Schema, builder: Builder, *, sort_keys: bool, share_strings: bool,
-                 force_defaults: bool, strict: bool):
+                 force_defaults: bool, strict: bool, share_tables: bool = False):
         self.schema = schema
         self.b = builder
+        # Private (to_bfbs): the same Python mapping, met twice, is written once
+        # and both offsets point at it. Not a public default: shared tables
+        # count against the verifier's max_refs budget.
+        self.tables: dict[int, tuple[Any, int]] | None = {} if share_tables else None
         self.sort_keys = sort_keys
         self.share = share_strings
         self.force_defaults = force_defaults
@@ -296,6 +300,16 @@ class _Encoder:
 
     # -- tables ----------------------------------------------------------------
     def table(self, obj: Object, v: Any, path: str) -> int:
+        if self.tables is not None:
+            seen = self.tables.get(id(v))
+            if seen is not None and seen[0] is v:
+                return seen[1]
+            off = self._table(obj, v, path)
+            self.tables[id(v)] = (v, off)       # keeps v alive, so its id stays unique
+            return off
+        return self._table(obj, v, path)
+
+    def _table(self, obj: Object, v: Any, path: str) -> int:
         from ._reader import TableView
         if isinstance(v, TableView):
             v = v._asdict(defaults=False, enums="value", deprecated=True)
@@ -492,14 +506,14 @@ def encode(schema: Schema, value: Any, root: str | Object | None = None, *,
 def _encode(schema: Schema, value: Any, root: str | Object | None, *,
             file_identifier: bool | str | bytes = True, size_prefixed: bool = False,
             sort_keys: bool = True, share_strings: bool = True, force_defaults: bool = False,
-            strict: bool = True, initial_size: int = 1024) -> Builder:
+            strict: bool = True, initial_size: int = 1024, share_tables: bool = False) -> Builder:
     """encode(), returning the finished Builder (``.output``, ``.minalign``)."""
     obj = schema.object(root)
     if obj.is_struct:
         raise SchemaError("the root of a buffer must be a table")
     b = Builder(initial_size)
     enc = _Encoder(schema, b, sort_keys=sort_keys, share_strings=share_strings,
-                   force_defaults=force_defaults, strict=strict)
+                   force_defaults=force_defaults, strict=strict, share_tables=share_tables)
     root_off = enc.table(obj, value, "")
     ident: str | bytes | None
     if file_identifier is True:

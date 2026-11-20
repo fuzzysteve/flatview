@@ -35,6 +35,11 @@ library itself has no runtime dependencies; keep it that way.
   layout) and `render()` back to `.fbs`.
 - `_bfbs.py`: `.bfbs` loader. It is bootstrapped: the bundled `reflection.fbs` is parsed
   with `_fbs.py`, then `.bfbs` files are read with `_reader.py`.
+  `to_bfbs()` writes them with the encoder. Its output must match flatc's
+  (`--bfbs-comments --bfbs-builtins`) field for field, except `fbs_files`
+  (`tests/test_to_bfbs.py`). Type indexes are positions in the name-sorted
+  (bytewise) objects/enums vectors, and `root_table` shares the object's entry
+  (the encoder's private `share_tables`).
 - `_reader.py`: lazy views. There is one generated class per table/struct, with one
   property per field, plus `Vector` subclasses (key lookup is on `TableVector`).
 - `_todict.py`: whole-tree conversion. It generates source for one converter function per

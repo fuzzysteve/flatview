@@ -197,7 +197,16 @@ schema["Product"].field("price").optional   # True
 schema["Category"].python       # IntEnum
 field.attributes                # user-defined attributes, e.g. {'my_attr': 'value'}
 print(schema.to_fbs())          # e.g. turn a .bfbs back into readable .fbs
+open("shop.bfbs", "wb").write(schema.to_bfbs())   # .fbs -> .bfbs, no flatc needed
 ```
+
+`to_bfbs()` writes what `flatc --schema -b --bfbs-comments --bfbs-builtins`
+writes, checked field by field against flatc for every test schema, and flatc
+accepts the result as a schema. It leaves out `fbs_files` (the include graph)
+and RPC services, which flatview doesn't model. `comments=False,
+builtins=False` gives plain `flatc --schema -b` output, but without the
+built-in attributes, a reloaded schema loses `nested_flatbuffer`,
+`force_align` and the like.
 
 `.bfbs` support is bootstrapped: flatview parses the bundled
 `reflection.fbs` with its own parser, then reads `.bfbs` files with its own
