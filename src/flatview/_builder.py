@@ -528,7 +528,7 @@ class _Encoder:
         nested_align = 8
         if nested is not None and not isinstance(value, (bytes, bytearray, memoryview, list, tuple)):
             from ._reader import nested_target
-            target = nested_target(self.schema, obj, f)
+            target = nested_target(f)
             b = _encode(self.schema, value, target, sort_keys=self.sort_keys,
                         share_strings=self.share, force_defaults=self.force_defaults,
                         strict=self.strict, file_identifier=False)
@@ -605,10 +605,11 @@ class _Encoder:
             if kf.type.base == BaseType.STRING:
                 return (k or "").encode("utf-8") if isinstance(k, str) else (k or b"")
             if k is None:
-                return kf.default or 0
-            # sort on the value that will be written: the same conversion as the
-            # field itself (enum names, "inf"/"nan" strings, ints for floats...)
-            k = self.scalar(kf.type.base, kf.type.enum, k, f"{path}[{pair[0]}].{kf.name}")
+                k = kf.default or 0           # absent: the reader sees the default
+            else:
+                # sort on the value that will be written: the same conversion as the
+                # field itself (enum names, "inf"/"nan" strings, ints for floats...)
+                k = self.scalar(kf.type.base, kf.type.enum, k, f"{path}[{pair[0]}].{kf.name}")
             if isinstance(k, float) and math.isnan(k):
                 # NaN is unordered: a vector containing it can't be sorted, and
                 # binary search over it (ours, or flatc's LookupByKey) misbehaves
@@ -701,8 +702,8 @@ def _compile_table(obj: Object, strict: bool, force_defaults: bool):
         else:
             descs.append((fid, "offset", 4, 4))
         # general method: it appends (id, kind, value, size) when the field is written
-        general = [f"    one = []", f"    enc.field(OBJ, {const(f)}, v, one, path)",
-                   f"    if one:", f"        m |= {bit}", f"        ap(one[0][2])"]
+        general = ["    one = []", f"    enc.field(OBJ, {const(f)}, v, one, path)",
+                   "    if one:", f"        m |= {bit}", "        ap(one[0][2])"]
         if base.is_scalar and base != BaseType.UTYPE:
             if base == BaseType.BOOL:
                 fast = "type(x) is bool"
@@ -732,9 +733,9 @@ def _compile_table(obj: Object, strict: bool, force_defaults: bool):
             sub = const(t.ref)
             # a plain dict goes straight to the child's compiled encoder: one
             # Python frame per nesting level, so deep data fits the recursion limit
-            body = [f"        if type(x) is dict and direct:",
+            body = ["        if type(x) is dict and direct:",
                     f"            ap((fns.get({sub}) or enc.fn_for({sub}))(enc, x, fp(path, {name})))",
-                    f"        else:",
+                    "        else:",
                     f"            ap(enc.table({sub}, x, fp(path, {name})))",
                     f"        m |= {bit}"]
         elif base == BaseType.VECTOR:

@@ -216,3 +216,32 @@ def test_foreign_tables_are_not_kept_alive():
     del b
     gc.collect()
     assert gone() is None
+
+
+def test_compiled_code_does_not_hold_the_reading_schema():
+    # views and converters depend only on the table: what one schema compiles
+    # for another's table neither keeps it alive nor changes what the owner reads
+    import gc
+    import weakref
+    src = "table I { x: int; } table X { n: [ubyte] (nested_flatbuffer: \"I\"); } root_type X;"
+    a = parse_fbs("table I { y: string; } " + src.split("} ", 1)[1])
+    b = parse_fbs(src)
+    data = b.encode({"n": {"x": 5}})
+    assert a.read(data, b.root)._asdict() == {"n": {"x": 5}}
+    assert a.read(data, b.root).n.x == 5
+    a.verify(data, b.root)
+    gone = weakref.ref(a)
+    del a
+    gc.collect()
+    assert gone() is None
+    assert b.read(data)._asdict() == {"n": {"x": 5}}
+
+
+def test_hand_built_schema_resolves_nested_roots():
+    from flatview import BaseType, Field, Object, Schema, Type
+    inner = Object("I", fields=[Field("x", Type(BaseType.INT), id=0, offset=4)], minalign=4, bytesize=0)
+    outer = Object("O", fields=[Field("n", Type(BaseType.VECTOR, element=BaseType.UBYTE), id=0, offset=4,
+                                      attributes={"nested_flatbuffer": "I"})], minalign=4, bytesize=0)
+    s = Schema(objects={"I": inner, "O": outer}, root=outer)
+    assert outer.fields[0].nested is inner
+    assert s.read(s.encode({"n": {"x": 7}})).n.x == 7

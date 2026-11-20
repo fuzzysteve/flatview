@@ -38,7 +38,10 @@ def _gunzip(data: bytes, path: str, limit: int) -> bytes:
     out = bytearray()
     while data:
         d = zlib.decompressobj(wbits=31)        # one gzip member
-        chunk = d.decompress(data, limit + 1 - len(out))
+        try:
+            chunk = d.decompress(data, limit + 1 - len(out))
+        except zlib.error as e:
+            raise OSError(f"{path}: corrupt gzip data ({e})") from None
         out += chunk
         if len(out) > limit or d.unconsumed_tail:
             raise _too_big(path, limit)
@@ -59,19 +62,25 @@ def _unzstd(data: bytes, path: str, limit: int) -> bytes:
         except ImportError:
             raise OSError(f"{path} is zstd-compressed; install 'zstandard' or use Python 3.14+") from None
         out = bytearray()
-        with zstandard.ZstdDecompressor().stream_reader(data, read_across_frames=True) as r:
-            while True:            # chunked: read(limit + 1) would allocate limit bytes up front
-                chunk = r.read(min(_CHUNK, limit + 1 - len(out)))
-                if not chunk:
-                    break
-                out += chunk
-                if len(out) > limit:
-                    raise _too_big(path, limit)
+        try:
+            with zstandard.ZstdDecompressor().stream_reader(data, read_across_frames=True) as r:
+                while True:            # chunked: read(limit + 1) would allocate limit bytes up front
+                    chunk = r.read(min(_CHUNK, limit + 1 - len(out)))
+                    if not chunk:
+                        break
+                    out += chunk
+                    if len(out) > limit:
+                        raise _too_big(path, limit)
+        except zstandard.ZstdError as e:
+            raise OSError(f"{path}: corrupt zstd data ({e})") from None
         return bytes(out)
     out = bytearray()
     while data:
         d = zstd.ZstdDecompressor()              # one frame
-        out += d.decompress(data, max_length=limit + 1 - len(out))
+        try:
+            out += d.decompress(data, max_length=limit + 1 - len(out))
+        except zstd.ZstdError as e:
+            raise OSError(f"{path}: corrupt zstd data ({e})") from None
         if len(out) > limit:
             raise _too_big(path, limit)
         if not d.eof:

@@ -259,7 +259,7 @@ class _Verifier:
                 self.fail(fpath, "nested flatbuffer is empty")
             if nested is not None:
                 from ._reader import nested_target
-                target = nested_target(self.schema, obj, f)
+                target = nested_target(f)
                 # As flatc: a nested buffer is verified on its own, so its
                 # alignment is relative to its own start, not the outer buffer's.
                 sub = _Verifier(self.schema, self.buf[start:start + n], max_depth=self.max_depth - depth,
@@ -482,7 +482,7 @@ def _compile_table(obj: Object, align: bool, strict_size: bool, utf8: bool, chec
         lines.append(f"    o = e[{_int(f.id)}]")
         general = [f"    if o or {bool(f.required)}:",       # True/False, whatever the attribute holds
                    f"        V.field(OBJ, {const(f)}, pos, vt, vtlen, tlen, _fmt({here}), depth)"]
-        missing = [f"    else:", f"        {slow}"] if f.required else []
+        missing = ["    else:", f"        {slow}"] if f.required else []
         ns["_fmt"] = _fmt
 
         def too_long(size: int) -> str:

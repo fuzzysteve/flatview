@@ -104,10 +104,12 @@ library itself has no runtime dependencies; keep it that way.
   pass `_int()`. Compiled code is cached on the table it was compiled for
   (`Object.compiled`, by kind and options), never by name in a schema: `root=` may be
   another schema's table of the same name, and a schema must not keep that alive.
+  For the same reason, view classes and compiled code depend only on the table, never on
+  the schema that asked for them (no schema argument, nothing captured).
   `Schema._clear_compiled()` drops it all (tests).
-  Nested-flatbuffer roots are resolved once at load (`Field.nested`, set by the parser and
-  `validate()`); readers, converters, encoder and verifier use `nested_target()`, never a
-  name lookup in the calling schema.
+  Nested-flatbuffer roots are resolved once (`Field.nested`, set by the parser,
+  `validate()`, and `Schema.__post_init__` for hand-built schemas); readers, converters,
+  encoder and verifier use `nested_target(f)`, never a name lookup.
 - `load_bfbs` must keep verifying the buffer against `reflection.fbs`, rejecting
   non-identifier names, and running `validate()` (layout sanity) before returning.
 - Every new kind of offset the verifier follows must go through `deref()`, so it counts

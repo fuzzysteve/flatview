@@ -337,6 +337,30 @@ class Schema:
     #: Where the schema came from (path or description), for messages.
     source: str | None = None
 
+    def __post_init__(self) -> None:
+        # A schema built by hand: point nested_flatbuffer fields at their root
+        # tables now, as the loaders do. Views and compiled code never look a
+        # name up later, so they don't depend on the schema that reads them.
+        for o in self.objects.values():
+            for f in o.fields:
+                name = f.attributes.get("nested_flatbuffer")
+                if name is not None and f.nested is None:
+                    target = self._resolve(name, o.namespace)
+                    if isinstance(target, Object) and not target.is_struct:
+                        f.nested = target
+
+    def _resolve(self, name: str, ns: str) -> "Object | Enum | None":
+        """``name`` as written inside namespace ``ns`` (innermost first)."""
+        parts = ns.split(".") if ns else []
+        for i in range(len(parts), -1, -1):
+            cand = ".".join(parts[:i] + [name])
+            if cand in self.objects:
+                return self.objects[cand]
+        try:
+            return self[name]
+        except KeyError:
+            return None
+
     # -- lookup --------------------------------------------------------------
     def __getitem__(self, name: str) -> Object | Enum:
         """Find a table/struct/enum by fully qualified *or* short name."""

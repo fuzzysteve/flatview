@@ -256,12 +256,8 @@ def validate(schema: Schema) -> None:
                     # as the .fbs parser: reader and verifier only agree on [ubyte]
                     if t.base != BaseType.VECTOR or t.element != BaseType.UBYTE:
                         fail(f"{owner}: nested_flatbuffer field must be [ubyte]")
-                    from ._reader import _resolve_in
-                    try:
-                        target = _resolve_in(schema, nested, o.namespace)
-                    except (KeyError, SchemaError):
-                        target = None
-                    if target is None or target.is_struct:
+                    target = schema._resolve(nested, o.namespace)
+                    if not isinstance(target, Object) or target.is_struct:
                         fail(f"{owner}: nested_flatbuffer {nested!r} is not a table in the schema")
                     f.nested = target
                 if f.key and not (t.base.is_scalar or t.base == BaseType.STRING):

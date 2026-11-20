@@ -38,7 +38,7 @@ def hammer(work, threads=8, trials=60):
         def run():
             barrier.wait()
             try:
-                results.append(work(root))
+                results.append(work(s, root))
             except Exception as e:        # noqa: BLE001 - any failure is the finding
                 errors.append(f"{type(e).__name__}: {e}")
         ts = [threading.Thread(target=run) for _ in range(threads)]
@@ -51,37 +51,37 @@ def hammer(work, threads=8, trials=60):
 
 
 def test_view_classes_never_seen_half_built():
-    for results in hammer(lambda root: root.a.lookup(1).f59):
+    for results in hammer(lambda s, root: root.a.lookup(1).f59):
         assert results == [1] * 8
 
 
 def test_one_python_enum_class_per_enum():
-    for results in hammer(lambda root: type(root.a[0].c)):
+    for results in hammer(lambda s, root: type(root.a[0].c)):
         assert len(set(results)) == 1
 
 
 def test_compiled_converters_concurrently():
-    for results in hammer(lambda root: root._asdict()["a"][2]["f59"]):
+    for results in hammer(lambda s, root: root._asdict()["a"][2]["f59"]):
         assert results == [2] * 8
 
 
 def test_compiled_encoders_concurrently():
     value = {"a": [{"k": i, "f59": i, "c": 1} for i in range(3)]}
     want = flatview.parse_fbs(SRC).encode(value)
-    for results in hammer(lambda root: root._schema.encode(value)):
+    for results in hammer(lambda s, root: s.encode(value)):
         assert results == [want] * 8
 
 
 def test_compiled_verifiers_concurrently():
-    def verify(root):
+    def verify(s, root):
         data = bytes(root._buf.obj)
-        root._schema.verify(data)
+        s.verify(data)
         bad = bytearray(data)
         p = root._field_offset("a")
         vec = p + struct.unpack_from("<I", data, p)[0]
         struct.pack_into("<I", bad, vec + 4, 0x7FFFFFF0)   # a[0] points far outside: same error everywhere
         try:
-            root._schema.verify(bytes(bad))
+            s.verify(bytes(bad))
             return "OK"
         except flatview.VerificationError as e:
             return str(e)

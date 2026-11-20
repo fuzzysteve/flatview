@@ -315,8 +315,11 @@ flatview schema shop.bfbs                     # print a binary schema as .fbs
 
 `info`, `get` and `dump` verify the file before reading it, so a corrupt or
 hostile file gets a one-line error naming the bad offset, not partial output
-and a traceback. `--no-verify` skips that (for a file known to be good, or to
-read what can still be read from a damaged one). `dump` round-trips through
+and a traceback. That is one pass over the whole file (about a second for the
+150 MB `types.fb`). `--no-verify` skips it, for a file known to be good or to
+read what can still be read from a damaged one. Only `get` requires keyed
+vectors to be sorted, because it binary-searches; `info` reports the order
+and `dump` doesn't depend on it. Bad `--path` or key input exits with status 2. `dump` round-trips through
 `encode`, including NaN and infinities, which JSON spells as `"nan"`/`"inf"`.
 
 ## Security

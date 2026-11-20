@@ -61,7 +61,6 @@ class TableView:
 
     __slots__ = ("_buf", "_pos", "_vt", "_vtlen")
     _object: Object
-    _schema: Schema
     _fields: tuple[str, ...]
     _getters: dict[str, Callable]
     _slots: dict[str, int]
@@ -148,7 +147,6 @@ class StructView:
 
     __slots__ = ("_buf", "_pos")
     _object: Object
-    _schema: Schema
     _fields: tuple[str, ...]
     _getters: dict[str, Callable]
 
@@ -336,7 +334,7 @@ class StructVector(Vector):
 
     def _aslist(self, *, defaults=True, enums="member", deprecated=False) -> list:
         from ._todict import converter
-        conv = converter(self._cls._schema, self._cls._object, defaults, enums, deprecated)
+        conv = converter(self._cls._object, defaults, enums, deprecated)
         s = self._stride
         return [conv(self._buf, p) for p in range(self._start, self._start + s * self._len, s)]
 
@@ -360,7 +358,7 @@ class TableVector(Vector):
     def _aslist(self, *, defaults=True, enums="member", deprecated=False) -> list:
         from ._todict import converter, fast_buffer
         buf, raw = fast_buffer(self._buf)
-        conv = converter(self._cls._schema, self._cls._object, defaults, enums, deprecated, raw)
+        conv = converter(self._cls._object, defaults, enums, deprecated, raw)
         return [conv(buf, p + _u32(buf, p)[0]) for p in range(self._start, self._start + 4 * self._len, 4)]
 
     # -- keyed access ------------------------------------------------------
@@ -487,7 +485,7 @@ _BUILD_LOCK = threading.RLock()
 _BUILDING: dict[int, type] = {}
 
 
-def view_class(schema: Schema, obj: Object) -> type:
+def view_class(obj: Object) -> type:
     """The (cached) generated view class for a table/struct. Thread-safe."""
     cls = obj.view_class
     if cls is not None:
@@ -497,7 +495,7 @@ def view_class(schema: Schema, obj: Object) -> type:
         if cls is not None:
             return cls
         try:
-            cls = _build_struct_class(schema, obj) if obj.is_struct else _build_table_class(schema, obj)
+            cls = _build_struct_class(obj) if obj.is_struct else _build_table_class(obj)
         finally:
             _BUILDING.pop(id(obj), None)
         obj.view_class = cls          # publish only when complete
@@ -526,15 +524,15 @@ def _enum_converter(enum: Enum | None) -> Callable | None:
     return conv
 
 
-def _build_table_class(schema: Schema, obj: Object) -> type:
-    ns: dict[str, Any] = {"__slots__": (), "_object": obj, "_schema": schema}
+def _build_table_class(obj: Object) -> type:
+    ns: dict[str, Any] = {"__slots__": (), "_object": obj}
     cls = type(obj.short_name, (TableView,), ns)
     cls.__qualname__ = obj.name
     _BUILDING[id(obj)] = cls  # visible to this (building) thread only; see view_class
     getters: dict[str, Callable] = {}
     slots: dict[str, int] = {}
     for f in obj.fields:
-        g = _table_getter(schema, obj, f)
+        g = _table_getter(obj, f)
         getters[f.name] = g
         slots[f.name] = f.offset
         if _attribute_ok(f.name, TableView):
@@ -597,7 +595,7 @@ def _key_reader(obj: Object) -> Callable[[memoryview, int], Any]:
     return read
 
 
-def _table_getter(schema: Schema, obj: Object, f: Field) -> Callable:
+def _table_getter(obj: Object, f: Field) -> Callable:
     slot = f.offset
     t = f.type
     base = t.base
@@ -648,13 +646,13 @@ def _table_getter(schema: Schema, obj: Object, f: Field) -> Callable:
         if sub.is_struct:
             def get(self):
                 p = locate(self)
-                return view_class(schema, sub)(self._buf, p) if p else None
+                return view_class(sub)(self._buf, p) if p else None
         else:
             def get(self):
                 p = locate(self)
                 if not p:
                     return None
-                return view_class(schema, sub)(self._buf, p + _u32(self._buf, p)[0])
+                return view_class(sub)(self._buf, p + _u32(self._buf, p)[0])
         return get
 
     if base == BaseType.UNION:
@@ -662,7 +660,7 @@ def _table_getter(schema: Schema, obj: Object, f: Field) -> Callable:
         if type_field is None:
             raise SchemaError(f"union field {obj.name}.{f.name} has no {f.name}_type field")
         type_slot = type_field.offset
-        members = _union_makers(schema, t.ref)
+        members = _union_makers(t.ref)
 
         def get(self):
             p = locate(self)
@@ -683,7 +681,7 @@ def _table_getter(schema: Schema, obj: Object, f: Field) -> Callable:
         el = t.element
         nested = f.attributes.get("nested_flatbuffer")
         if nested is not None:
-            target = nested_target(schema, obj, f)
+            target = nested_target(f)
 
             def get(self):
                 p = locate(self)
@@ -692,7 +690,7 @@ def _table_getter(schema: Schema, obj: Object, f: Field) -> Callable:
                 vp = p + _u32(self._buf, p)[0]
                 n = _u32(self._buf, vp)[0]
                 inner = self._buf[vp + 4:vp + 4 + n]
-                return read(schema, inner, target, size_prefixed=False, check_identifier=False)
+                return _root_view(inner, target)
             return get
 
         if el.is_scalar:
@@ -707,15 +705,15 @@ def _table_getter(schema: Schema, obj: Object, f: Field) -> Callable:
             sub = t.ref
             if sub.is_struct:
                 def make_vec(buf, vp):
-                    return StructVector(buf, vp + 4, _u32(buf, vp)[0], view_class(schema, sub))
+                    return StructVector(buf, vp + 4, _u32(buf, vp)[0], view_class(sub))
             else:
                 def make_vec(buf, vp):
-                    return TableVector(buf, vp + 4, _u32(buf, vp)[0], view_class(schema, sub))
+                    return TableVector(buf, vp + 4, _u32(buf, vp)[0], view_class(sub))
         elif el == BaseType.UNION:
             type_field = obj.fields_by_name.get(f.name + "_type")
             if type_field is None:
                 raise SchemaError(f"union vector {obj.name}.{f.name} has no {f.name}_type field")
-            members = _union_makers(schema, t.ref)
+            members = _union_makers(t.ref)
             type_getter = None
 
             def get(self):
@@ -750,7 +748,7 @@ def _table_getter(schema: Schema, obj: Object, f: Field) -> Callable:
     raise SchemaError(f"unsupported field type {base.name} in {obj.name}.{f.name}")
 
 
-def _union_makers(schema: Schema, union: Enum) -> dict[int, Callable]:
+def _union_makers(union: Enum) -> dict[int, Callable]:
     makers: dict[int, Callable] = {}
     for v in union.values:
         ut = v.union_type
@@ -762,36 +760,29 @@ def _union_makers(schema: Schema, union: Enum) -> dict[int, Callable]:
             sub = ut.ref
 
             def make(buf, pos, _sub=sub):
-                return view_class(schema, _sub)(buf, pos)
+                return view_class(_sub)(buf, pos)
             makers[v.value] = make
     return makers
 
 
-def nested_target(schema: Schema, obj: Object, f: Field) -> Object:
-    """Root table of ``f``'s nested flatbuffer: the one resolved when the schema
-    was loaded, else (a hand-built schema) looked up by name in ``schema``."""
-    if f.nested is not None:
-        return f.nested
-    return _resolve_in(schema, f.attributes["nested_flatbuffer"], obj.namespace)
+def nested_target(f: Field) -> Object:
+    """Root table of ``f``'s nested flatbuffer, resolved when the schema was
+    loaded (as flatc keeps a pointer), so it never depends on which schema
+    is reading."""
+    if f.nested is None:
+        raise SchemaError(f"nested_flatbuffer field {f.name}: root table "
+                          f"{f.attributes.get('nested_flatbuffer')!r} is not resolved")
+    return f.nested
 
 
-def _resolve_in(schema: Schema, name: str, ns: str) -> Object:
-    parts = ns.split(".") if ns else []
-    for i in range(len(parts), -1, -1):
-        cand = ".".join(parts[:i] + [name])
-        if cand in schema.objects:
-            return schema.objects[cand]
-    return schema.object(name)
-
-
-def _build_struct_class(schema: Schema, obj: Object) -> type:
-    ns: dict[str, Any] = {"__slots__": (), "_object": obj, "_schema": schema}
+def _build_struct_class(obj: Object) -> type:
+    ns: dict[str, Any] = {"__slots__": (), "_object": obj}
     cls = type(obj.short_name, (StructView,), ns)
     cls.__qualname__ = obj.name
     _BUILDING[id(obj)] = cls
     getters: dict[str, Callable] = {}
     for f in obj.fields:
-        g = _struct_getter(schema, f)
+        g = _struct_getter(f)
         getters[f.name] = g
         if _attribute_ok(f.name, StructView):
             setattr(cls, f.name, property(g, doc=_field_doc(f)))
@@ -800,7 +791,7 @@ def _build_struct_class(schema: Schema, obj: Object) -> type:
     return cls
 
 
-def _struct_getter(schema: Schema, f: Field) -> Callable:
+def _struct_getter(f: Field) -> Callable:
     off = f.offset
     t = f.type
     if t.base.is_scalar:
@@ -811,12 +802,12 @@ def _struct_getter(schema: Schema, f: Field) -> Callable:
         return lambda self: conv(unpack(self._buf, self._pos + off)[0])
     if t.base == BaseType.OBJ:
         sub = t.ref
-        return lambda self: view_class(schema, sub)(self._buf, self._pos + off)
+        return lambda self: view_class(sub)(self._buf, self._pos + off)
     if t.base == BaseType.ARRAY:
         n = t.fixed_length
         if t.element == BaseType.OBJ:
             sub = t.ref
-            return lambda self: StructVector(self._buf, self._pos + off, n, view_class(schema, sub))
+            return lambda self: StructVector(self._buf, self._pos + off, n, view_class(sub))
         conv = _enum_converter(t.enum)
         el = t.element
         return lambda self: ScalarVector(self._buf, self._pos + off, n, el, conv)
@@ -855,7 +846,7 @@ def _to_python(view: TableView | StructView, defaults: bool, enums: str, depreca
     # but it is still the row's identity.
     from ._todict import converter, fast_buffer
     buf, raw = fast_buffer(view._buf)
-    return converter(view._schema, view._object, defaults, enums, deprecated, raw)(buf, view._pos)
+    return converter(view._object, defaults, enums, deprecated, raw)(buf, view._pos)
 
 
 def to_python(value: Any, *, defaults: bool = True, enums: str = "member",
@@ -926,7 +917,13 @@ def read(schema: Schema, data: Any, root: str | Object | None = None, *, verify:
         if bytes(buf[4:8]) != schema.file_ident.encode():
             raise FlatBufferError(f"file identifier {bytes(buf[4:8])!r} does not match schema's "
                                   f"{schema.file_ident!r}")
+    return _root_view(buf, obj)
+
+
+def _root_view(buf: memoryview, obj: Object) -> TableView:
+    if len(buf) < 8:
+        raise FlatBufferError(f"buffer too small ({len(buf)} bytes) to be a FlatBuffer")
     pos = _u32(buf, 0)[0]
     if pos + 4 > len(buf):
         raise FlatBufferError(f"root offset {pos} is outside the buffer")
-    return view_class(schema, obj)(buf, pos)
+    return view_class(obj)(buf, pos)

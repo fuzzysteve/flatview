@@ -146,3 +146,57 @@ def test_no_verify_reads_until_it_fails_cleanly(tmp_path, capsys):
     assert len(out.splitlines()) == 44                          # the rows before the damage
     assert err.startswith("error: cannot read") and "flatview verify" in err
     assert main(["dump", bad, "--jsonl", "--limit", "3", "--no-verify"]) == 0
+
+
+def _unsorted(tmp_path):
+    import flatview
+    (tmp_path / "u.fbs").write_text("table R { k: int (key); } table T { rs: [R]; } root_type T;")
+    s = flatview.load_schema(tmp_path / "u.fbs")
+    (tmp_path / "u.bin").write_bytes(s.encode({"rs": [{"k": 2}, {"k": 1}]}, sort_keys=False))
+    return [str(tmp_path / "u.bin"), "-s", str(tmp_path / "u.fbs")]
+
+
+def test_unsorted_keys_are_data_for_info_and_dump(tmp_path, capsys):
+    f = _unsorted(tmp_path)
+    assert main(["info", *f]) == 0
+    assert "sorted: False" in capsys.readouterr().out
+    assert main(["dump", *f, "--jsonl"]) == 0
+    assert capsys.readouterr().out.splitlines() == ['{"k": 2}', '{"k": 1}']
+    # get binary-searches, so it still needs the order
+    assert main(["get", *f, "1"]) == 1
+    assert "not sorted" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("args, msg", [
+    (["dump", "--path", "nosuch"], "--path nosuch: the root has no 'nosuch'"),
+    (["dump", "--path", "rs.9"], "--path rs.9: rs has no '9'"),
+    (["dump", "--path", "rs.x"], "--path rs.x: rs has no 'x'"),
+    (["dump", "--path", "rs.0.k.z"], "--path rs.0.k.z: rs.0.k has no 'z'"),
+    (["get", "abc"], "key 'abc': k is a number"),
+])
+def test_bad_input_is_a_usage_error(tmp_path, capsys, args, msg):
+    f = _unsorted(tmp_path)
+    assert main([args[0], *f, *args[1:]] if args[0] == "dump" else ["get", *f, "--no-verify", *args[1:]]) == 2
+    err = capsys.readouterr().err
+    assert err == f"error: {msg}\n"
+
+
+@pytest.mark.parametrize("payload", [b"\x1f\x8b\x08\x00" + b"\xff" * 40, b"\x1f\x8b"])
+def test_corrupt_gzip_is_one_line(tmp_path, capsys, payload):
+    f = _unsorted(tmp_path)
+    (tmp_path / "u.bin").write_bytes(payload)
+    assert main(["info", *f]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and err.count("\n") == 1 and "gzip" in err
+
+
+def test_internal_errors_outside_reading_keep_their_traceback(tmp_path, monkeypatch):
+    import flatview
+    f = _unsorted(tmp_path)
+    (tmp_path / "v.json").write_text("{}")
+
+    def boom(*a, **k):
+        raise IndexError("bug")
+    monkeypatch.setattr(flatview.Schema, "encode", boom)
+    with pytest.raises(IndexError):
+        main(["encode", f[2], str(tmp_path / "v.json"), "-o", str(tmp_path / "o.bin")])

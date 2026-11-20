@@ -258,10 +258,9 @@ class Values:
             if nested is not None:
                 if depth >= 3:
                     return _SKIP
-                from flatview._reader import _resolve_in
                 # flatc's JSON parser rejects `nan` inside a nested flatbuffer
                 # (inf is fine), so keep NaN out of nested values
-                return _no_nan(self.table(_resolve_in(self.s, nested, obj.namespace), depth + 1))
+                return _no_nan(self.table(self.s._resolve(nested, obj.namespace), depth + 1))
             if el == BaseType.UNION:
                 members = [v for v in t.ref.values if v.value != 0]
                 if not members or depth >= 3:
@@ -372,8 +371,7 @@ def expect_member(schema, member, x):
 
 
 def nested_target(schema, obj, f):
-    from flatview._reader import _resolve_in
-    return _resolve_in(schema, f.attributes["nested_flatbuffer"], obj.namespace)
+    return schema._resolve(f.attributes["nested_flatbuffer"], obj.namespace)
 
 
 def expect_table(schema, obj, v: dict) -> dict:

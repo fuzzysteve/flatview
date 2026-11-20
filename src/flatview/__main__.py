@@ -20,8 +20,8 @@ import sys
 import time
 from typing import Any
 
-from . import (EncodeError, FlatBufferError, Schema, SchemaError, TableVector, Vector, VerificationError,
-               load_schema, open as fv_open)
+from . import (DecompressionLimitError, EncodeError, FlatBufferError, Schema, SchemaError, TableVector,
+               Vector, VerificationError, load_schema, open as fv_open)
 from ._reader import TableView
 
 
@@ -66,16 +66,44 @@ def _dumps(v: Any, indent: int | None) -> str:
     return _escape_unsafe(json.dumps(_clean(v), ensure_ascii=False, indent=indent, default=_json_default))
 
 
+class _Usage(Exception):
+    """Bad command-line input: one line on stderr, exit status 2."""
+
+
+def _open(args, *, check_sorted: bool):
+    """Open args.file and, unless --no-verify, verify all of it first.
+
+    check_sorted=False for commands that don't depend on key order: an
+    unsorted keyed vector is legitimate data (`flatview verify --no-sorted`).
+    """
+    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed)
+    if not args.no_verify:
+        try:
+            fb.verify(check_sorted=check_sorted)
+        except BaseException:
+            fb.close()
+            raise
+    return fb
+
+
 def _pick(root: TableView, path: str | None) -> Any:
     """Follow a dotted path like 'rows' or 'rows.3.name' from the root."""
     cur: Any = root
     if not path:
         return cur
+    done = []
     for part in path.split("."):
-        if isinstance(cur, Vector):
-            cur = cur[int(part)]
-        else:
-            cur = cur[part]
+        try:
+            if isinstance(cur, Vector):
+                cur = cur[int(part)]
+            elif isinstance(cur, TableView) or hasattr(cur, "_getters"):
+                cur = cur[part]
+            else:
+                raise KeyError(part)
+        except (KeyError, ValueError, IndexError):
+            where = ".".join(done) or "the root"
+            raise _Usage(f"--path {path}: {where} has no {part!r}") from None
+        done.append(part)
     return cur
 
 
@@ -88,8 +116,7 @@ def _main_vector(root: TableView) -> TableVector | None:
 
 
 def cmd_info(args) -> int:
-    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed,
-                 verify=not args.no_verify)
+    fb = _open(args, check_sorted=False)
     s = fb.schema
     print(_show(f"file:    {args.file} ({len(fb.data):,} bytes uncompressed)"))
     print(_show(f"schema:  {s.source}"))
@@ -115,17 +142,19 @@ def cmd_info(args) -> int:
 
 
 def cmd_get(args) -> int:
-    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed,
-                 verify=not args.no_verify)
+    fb = _open(args, check_sorted=True)       # lookups binary-search: order matters
     vec = _pick(fb.root, args.path) if args.path else _main_vector(fb.root)
     if not isinstance(vec, TableVector) or vec.key_field is None:
         print("error: no keyed vector to look up in (use --path)", file=sys.stderr)
         return 2
     key: Any = args.key
-    if vec.key_field.type.base.is_integer:
-        key = int(key)
-    elif vec.key_field.type.base.is_float:
-        key = float(key)
+    try:
+        if vec.key_field.type.base.is_integer:
+            key = int(key)
+        elif vec.key_field.type.base.is_float:
+            key = float(key)
+    except ValueError:
+        raise _Usage(f"key {args.key!r}: {vec.key_field.name} is a number") from None
     row = vec.find(key)
     if row is None:
         print(f"error: {key!r} not found", file=sys.stderr)
@@ -135,8 +164,7 @@ def cmd_get(args) -> int:
 
 
 def cmd_dump(args) -> int:
-    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed,
-                 verify=not args.no_verify)
+    fb = _open(args, check_sorted=False)
     target = _pick(fb.root, args.path)
     if args.jsonl:
         if not isinstance(target, Vector):
@@ -210,7 +238,9 @@ def main(argv: list[str] | None = None) -> int:
     def reading(sp):
         common(sp)
         sp.add_argument("--no-verify", action="store_true",
-                        help="read without verifying the file first (it may be corrupt or hostile)")
+                        help="don't verify the whole file first (a full pass, about a second "
+                             "per 150 MB); then a corrupt or hostile file may fail part way")
+        sp.set_defaults(reads=True)
 
     sp = sub.add_parser("info", help="summarise a file and its schema")
     reading(sp)
@@ -260,14 +290,20 @@ def main(argv: list[str] | None = None) -> int:
                     + ("\n(--no-verify reads it anyway)" if hasattr(args, "no_verify") else "")),
               file=sys.stderr)
         return 1
-    except (FlatBufferError, SchemaError, EncodeError, struct.error, UnicodeDecodeError, IndexError,
+    except _Usage as e:
+        print(_show(f"error: {e}"), file=sys.stderr)
+        return 2
+    except (FlatBufferError, SchemaError, EncodeError, DecompressionLimitError, json.JSONDecodeError,
             OSError) as e:
-        # one line, never a traceback: reading unverified data can fail anywhere
-        if isinstance(e, (struct.error, IndexError, UnicodeDecodeError)) and hasattr(args, "file"):
-            msg = f"error: cannot read {args.file} (corrupt? `flatview verify` says where): {e}"
-        else:
-            msg = f"error: {e}"
-        print(_show(msg), file=sys.stderr)
+        print(_show(f"error: {e}"), file=sys.stderr)
+        return 1
+    except (struct.error, IndexError, UnicodeDecodeError) as e:
+        # reading unverified data (--no-verify) can fail anywhere: one line,
+        # never a traceback. Elsewhere these are bugs, so they propagate.
+        if not getattr(args, "reads", False):
+            raise
+        print(_show(f"error: cannot read {args.file} (corrupt? `flatview verify` says where): {e}"),
+              file=sys.stderr)
         return 1
 
 

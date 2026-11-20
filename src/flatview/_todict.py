@@ -10,12 +10,11 @@ re-examined per row.
 
 from __future__ import annotations
 
-import enum
 import mmap
 import struct
 from typing import Any, Callable
 
-from ._schema import BaseType, Enum, Field, Object, Schema, SCALAR_FORMAT, SCALAR_SIZE
+from ._schema import BaseType, Enum, Field, Object, SCALAR_FORMAT
 
 def _flag_namer(enum_: Enum) -> Callable[[int], Any]:
     """flatc-style space-separated names for a bit_flags value."""
@@ -35,12 +34,12 @@ def _flag_namer(enum_: Enum) -> Callable[[int], Any]:
 WIDE_TABLE = 256
 
 
-def _generic_table(schema: Schema, obj: Object, defaults: bool, enums: str,
+def _generic_table(obj: Object, defaults: bool, enums: str,
                    deprecated: bool) -> Callable[[Any, int], dict]:
     """Field-by-field converter through the view classes: same output as the
     compiled converters, constant code size whatever the table width."""
     from ._reader import _plain, view_class
-    cls = view_class(schema, obj)
+    cls = view_class(obj)
     fields = [(f.name, cls._getters[f.name], f.key) for f in obj.fields
               if deprecated or not f.deprecated]
 
@@ -94,8 +93,7 @@ class _ZeroPads(dict):
 
 
 class _Gen:
-    def __init__(self, schema: Schema, defaults: bool, enums: str, deprecated: bool, raw: bool):
-        self.schema = schema
+    def __init__(self, defaults: bool, enums: str, deprecated: bool, raw: bool):
         # raw: buf is bytes/mmap, whose slices are bytes (fast .decode());
         # otherwise a memoryview, decoded with str(slice, 'utf-8').
         self.raw = raw
@@ -187,7 +185,7 @@ class _Gen:
         def call(buf, pos):
             f = holder.get("f")
             if f is None:
-                f = holder["f"] = converter(self.schema, obj, self.defaults, self.enums, self.deprecated, False)
+                f = holder["f"] = converter(obj, self.defaults, self.enums, self.deprecated, False)
             return f(buf, pos)
         return self.const(call, "N")
 
@@ -237,7 +235,7 @@ class _Gen:
         if len(obj.fields) > WIDE_TABLE:
             # Compiling one branch per field costs ~13 KB per field, and a
             # hostile schema can declare 32k fields: use the generic converter.
-            g = self.const(_generic_table(self.schema, obj, self.defaults, self.enums, self.deprecated), "G")
+            g = self.const(_generic_table(obj, self.defaults, self.enums, self.deprecated), "G")
             self.src.append(f"def {name}(buf, pos):\n    return {g}(buf, pos)\n")
             return
         fields = [f for f in obj.fields if self.deprecated or not f.deprecated]
@@ -322,7 +320,7 @@ class _Gen:
         if nested is not None:
             from ._reader import nested_target
             # nested buffers are converted by the memoryview flavour
-            target = self.nested_fn(nested_target(self.schema, obj, f))
+            target = self.nested_fn(nested_target(f))
             return ["nb = memoryview(buf)[p + 4:p + 4 + n]", f"d[{key}] = {target}(nb, u32(nb, 0)[0])"]
         if el.is_scalar:
             fmt = SCALAR_FORMAT[el]
@@ -372,15 +370,15 @@ class _Deferred:
         return fn(buf, pos)
 
 
-def _compile(schema: Schema, obj: Object, defaults: bool, enums: str, deprecated: bool,
+def _compile(obj: Object, defaults: bool, enums: str, deprecated: bool,
              raw: bool) -> Callable:
-    gen = _Gen(schema, defaults, enums, deprecated, raw)
+    gen = _Gen(defaults, enums, deprecated, raw)
     gen.run(obj)
-    exec(compile("\n".join(gen.src), f"<flatview converters for {schema.source or 'schema'}>", "exec"), gen.ns)
+    exec(compile("\n".join(gen.src), "<flatview converter>", "exec"), gen.ns)
     return gen.ns[gen.names[obj]]
 
 
-def converter(schema: Schema, obj: Object, defaults: bool = True, enums: str = "member",
+def converter(obj: Object, defaults: bool = True, enums: str = "member",
               deprecated: bool = False, raw: bool = False) -> Callable[[Any, int], Any]:
     """Cached ``(buf, pos) -> dict`` converter for a table/struct.
 
@@ -394,7 +392,7 @@ def converter(schema: Schema, obj: Object, defaults: bool = True, enums: str = "
     key = ("converter", bool(defaults), enums, bool(deprecated), bool(raw))
     fn = obj.compiled.get(key)
     if fn is None:
-        fn = obj.compiled[key] = _compile(schema, obj, bool(defaults), enums, bool(deprecated), bool(raw))
+        fn = obj.compiled[key] = _compile(obj, bool(defaults), enums, bool(deprecated), bool(raw))
     return fn
 
 

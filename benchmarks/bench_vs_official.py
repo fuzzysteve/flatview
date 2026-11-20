@@ -13,6 +13,9 @@ import random
 import subprocess
 import sys
 import tempfile
+import time
+
+import flatview
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 import get_flatc  # noqa: E402
@@ -20,9 +23,6 @@ import get_flatc  # noqa: E402
 # the pinned flatc (scripts/get_flatc.py), as the tests and fuzzers use, so the
 # generated official code matches the flatbuffers package version
 FLATC = get_flatc.resolve() or sys.exit("no flatc: run scripts/get_flatc.py")
-import time
-
-import flatview
 
 SDE = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "tests", "data", "sde-full")
 
