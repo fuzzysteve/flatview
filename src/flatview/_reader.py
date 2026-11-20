@@ -70,6 +70,9 @@ class TableView:
         self._buf = buf
         self._pos = pos
         vt = pos - _i32(buf, pos)[0]
+        if vt < 0:
+            # struct would read a negative offset from the buffer's end
+            raise FlatBufferError(f"vtable of table at {pos} is before the start of the buffer")
         self._vt = vt
         self._vtlen = _u16(buf, vt)[0]
 
@@ -190,7 +193,9 @@ class StructView:
         return NotImplemented
 
     def __hash__(self) -> int:
-        return hash((self._object.name, self._bytes()))
+        # Consistent with __eq__ both ways: equal bytes give equal values, and
+        # a struct equal to a tuple hashes like it (an IntEnum hashes like its int).
+        return hash(_hash_key(self))
 
     def __dir__(self):
         return sorted(set(super().__dir__()) | set(self._fields))
@@ -198,6 +203,16 @@ class StructView:
     def __repr__(self) -> str:
         inner = ", ".join(f"{n}={_short_repr(v, 0)}" for n, v in zip(self._fields, self))
         return f"{self._object.short_name}({inner})"
+
+
+def _hash_key(v: Any) -> Any:
+    if isinstance(v, StructView):
+        return tuple(_hash_key(x) for x in v)
+    if isinstance(v, Vector):
+        return tuple(_hash_key(x) for x in v)
+    if isinstance(v, float) and v != v:
+        return "nan"            # NaN objects hash by identity; equal bytes must hash equal
+    return v
 
 
 # ==========================================================================
@@ -546,13 +561,20 @@ def _field_doc(f: Field) -> str:
     return doc
 
 
+def _vtable(buf, pos: int) -> int:
+    vt = pos - _i32(buf, pos)[0]
+    if vt < 0:
+        raise FlatBufferError(f"vtable of table at {pos} is before the start of the buffer")
+    return vt
+
+
 def _key_reader(obj: Object) -> Callable[[memoryview, int], Any]:
     """Fast raw reader for the key field: (buf, table_pos) -> comparable value."""
     f = obj.key_field
     slot = f.offset
     if f.type.base == BaseType.STRING:
         def read(buf, pos):
-            vt = pos - _i32(buf, pos)[0]
+            vt = _vtable(buf, pos)
             if slot < _u16(buf, vt)[0]:
                 o = _u16(buf, vt + slot)[0]
                 if o:
@@ -566,7 +588,7 @@ def _key_reader(obj: Object) -> Callable[[memoryview, int], Any]:
     default = f.default if f.default is not None else 0
 
     def read(buf, pos):
-        vt = pos - _i32(buf, pos)[0]
+        vt = _vtable(buf, pos)
         if slot < _u16(buf, vt)[0]:
             o = _u16(buf, vt + slot)[0]
             if o:
@@ -880,6 +902,10 @@ def read(schema: Schema, data: Any, root: str | Object | None = None, *, verify:
     obj = schema.object(root)
     if obj.is_struct:
         raise SchemaError(f"root type {obj.name} must be a table")
+    if verify:
+        # on the whole buffer: alignment is relative to its start, prefix included
+        from ._verify import verify as _verify
+        _verify(schema, buf, root, size_prefixed=size_prefixed, check_identifier=check_identifier)
     if size_prefixed:
         n = _u32(buf, 0)[0]
         if n + 4 > len(buf):
@@ -887,13 +913,11 @@ def read(schema: Schema, data: Any, root: str | Object | None = None, *, verify:
         buf = buf[4:4 + n]
     if len(buf) < 8:
         raise FlatBufferError(f"buffer too small ({len(buf)} bytes) to be a FlatBuffer")
-    if check_identifier and schema.file_ident and root is None:
+    # the identifier belongs to the schema's root type, however root was given
+    if check_identifier and schema.file_ident and obj is schema.root:
         if bytes(buf[4:8]) != schema.file_ident.encode():
             raise FlatBufferError(f"file identifier {bytes(buf[4:8])!r} does not match schema's "
                                   f"{schema.file_ident!r}")
-    if verify:
-        from ._verify import verify as _verify
-        _verify(schema, buf, obj, size_prefixed=False, check_identifier=False)
     pos = _u32(buf, 0)[0]
     if pos + 4 > len(buf):
         raise FlatBufferError(f"root offset {pos} is outside the buffer")

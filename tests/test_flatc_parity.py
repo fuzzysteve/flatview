@@ -161,3 +161,41 @@ def test_encoder_fuzz_against_flatc():
                          capture_output=True, text=True, timeout=900)
     assert res.returncode == 0, res.stderr
     assert "findings (kind, bucket): count" in res.stdout and res.stdout.rstrip().endswith("none"), res.stdout
+
+
+# -- nested flatbuffers with alignment > 8 ------------------------------------
+
+NESTED16 = parse_fbs("""
+    struct V (force_align: 16) { x: float; }
+    table I { v: V; }
+    table O { pad: byte; n: [ubyte] (nested_flatbuffer: "I"); }
+    root_type O;
+""")
+
+
+def test_nested_buffer_aligned_to_its_own_minalign():
+    # flatc: ForceVectorAlignment(..., nested builder's minalign). We used 8,
+    # and then rejected our own output.
+    data = NESTED16.encode({"n": {"v": {"x": 1.0}}})
+    NESTED16.verify(data)
+    root = NESTED16.read(data)
+    start = root._field_offset("n") + struct.unpack_from("<I", data, root._field_offset("n"))[0] + 4
+    assert start % 16 == 0
+    assert root.n.v.x == 1.0
+
+
+def test_nested_buffer_alignment_is_relative_to_its_own_start():
+    # flatc verifies a nested buffer with a fresh Verifier over its bytes, so
+    # alignment counts from the nested start, not the outer buffer's.
+    inner = NESTED16.encode({"v": {"x": 1.0}}, "I")
+    for extra in range(16):
+        b = Builder()
+        b.pad(extra)
+        vec = b.create_scalar_vector(BaseType.UBYTE, list(inner), 8)
+        data = b.finish(b.table([(1, "offset", vec, 4)]))
+        if data.find(inner) % 16 == 8:
+            break
+    else:
+        pytest.fail("could not place the nested buffer 8 bytes off 16-alignment")
+    NESTED16.verify(data)
+    assert NESTED16.read(data)._asdict()["n"] == {"v": {"x": 1.0}}

@@ -40,8 +40,8 @@ class _Verifier:
         # intact, so the stricter check is opt-in.
         self.strict_size = strict_table_size
         # Offset of buf[0] within the enclosing allocation (4 after a size
-        # prefix, the vector position for nested buffers): alignment is
-        # relative to the start of the whole buffer.
+        # prefix): alignment is relative to the start of the whole buffer.
+        # Nested buffers are their own allocation (base 0), as in flatc.
         self.base = base
         self.buf = buf
         self.n = len(buf)
@@ -235,10 +235,12 @@ class _Verifier:
             if nested is not None:
                 from ._reader import _resolve_in
                 target = _resolve_in(self.schema, nested, obj.namespace)
+                # As flatc: a nested buffer is verified on its own, so its
+                # alignment is relative to its own start, not the outer buffer's.
                 sub = _Verifier(self.schema, self.buf[start:start + n], max_depth=self.max_depth - depth,
                                 max_refs=self.max_refs - self.refs, check_alignment=self.align,
                                 check_sorted=self.sorted, check_utf8=self.utf8,
-                                strict_enums=self.strict_enums, base=self.base + start,
+                                strict_enums=self.strict_enums, base=0,
                                 strict_table_size=self.strict_size)
                 sub.root(target, fpath)
                 self.refs += sub.refs
@@ -331,7 +333,8 @@ def verify(schema: Schema, data: Any, root: str | Object | None = None, *,
         if n + 4 > len(buf):
             raise VerificationError("", f"size prefix {n} exceeds buffer length {len(buf)}")
         buf = buf[4:4 + n]
-    if check_identifier and schema.file_ident and root is None:
+    # the identifier belongs to the schema's root type, however root was given
+    if check_identifier and schema.file_ident and obj is schema.root:
         if bytes(buf[4:8]) != schema.file_ident.encode():
             raise VerificationError("", f"file identifier {bytes(buf[4:8])!r} != {schema.file_ident!r}")
     if max_refs is None:

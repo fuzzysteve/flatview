@@ -867,6 +867,42 @@ class _Resolver:
             raise SchemaError(f"{where}: default value of {f.default} for field {f.name} is not part of "
                               f"enum {enum.name}")
 
+    def layout_struct(self, obj: Object, stack: set[str], done: set[str]) -> None:
+        """Lay out ``obj`` and every struct it contains, innermost first.
+
+        Iterative (explicit stack), so deeply nested struct declarations cannot
+        hit Python's recursion limit.
+        """
+        work: list[tuple[Object, bool]] = [(obj, False)]
+        while work:
+            o, ready = work.pop()
+            if o.name in done:
+                continue
+            if ready:
+                stack.discard(o.name)
+                _layout_one(o)
+                done.add(o.name)
+                continue
+            if o.name in stack:
+                raise SchemaError(f"struct {o.name} contains itself")
+            if not o.fields:
+                raise SchemaError(f"struct {o.name}: size 0 structs not allowed")
+            stack.add(o.name)
+            work.append((o, True))
+            for f in o.fields:
+                if f.type.item == BaseType.OBJ and f.type.ref.name not in done:
+                    if f.type.ref.name in stack:
+                        raise SchemaError(f"struct {f.type.ref.name} contains itself")
+                    work.append((f.type.ref, False))
+
+    def check_nested(self, obj: Object, d: _ObjDecl) -> None:
+        for f in obj.fields:
+            nested = f.attributes.get("nested_flatbuffer")
+            if nested is not None:
+                if f.type.base != BaseType.VECTOR or f.type.element != BaseType.UBYTE:
+                    raise SchemaError(f"{d.file}: nested_flatbuffer field {obj.name}.{f.name} must be [ubyte]")
+                self.lookup(nested, d.namespace, d.file)
+
 
 _INT_LITERAL = re.compile(r"[-+]?(0[xX][0-9a-fA-F]+|[0-9]+)")
 _HEX_FLOAT = re.compile(r"[-+]?0[xX](?:[0-9a-fA-F]+\.?[0-9a-fA-F]*|\.[0-9a-fA-F]+)(?:[pP][-+]?[0-9]+)?")
@@ -925,35 +961,6 @@ def _scalar_align(t: Type, item: BaseType) -> tuple[int, int]:
     return SCALAR_SIZE[item], SCALAR_SIZE[item]
 
 
-def _layout_struct(self: _Resolver, obj: Object, stack: set[str], done: set[str]) -> None:
-    """Lay out ``obj`` and every struct it contains, innermost first.
-
-    Iterative (explicit stack), so deeply nested struct declarations cannot
-    hit Python's recursion limit.
-    """
-    work: list[tuple[Object, bool]] = [(obj, False)]
-    while work:
-        o, ready = work.pop()
-        if o.name in done:
-            continue
-        if ready:
-            stack.discard(o.name)
-            _layout_one(o)
-            done.add(o.name)
-            continue
-        if o.name in stack:
-            raise SchemaError(f"struct {o.name} contains itself")
-        if not o.fields:
-            raise SchemaError(f"struct {o.name}: size 0 structs not allowed")
-        stack.add(o.name)
-        work.append((o, True))
-        for f in o.fields:
-            if f.type.item == BaseType.OBJ and f.type.ref.name not in done:
-                if f.type.ref.name in stack:
-                    raise SchemaError(f"struct {f.type.ref.name} contains itself")
-                work.append((f.type.ref, False))
-
-
 def _layout_one(obj: Object) -> None:
     """Compute offsets/padding/size of one struct whose members are laid out."""
     size, minalign = 0, 1
@@ -984,19 +991,6 @@ def _layout_one(obj: Object) -> None:
         # reflection stores field offsets as uint16: flatc accepts such structs
         # but writes wrapped (wrong) offsets to .bfbs, so refuse them
         raise SchemaError(f"struct {obj.name} is {obj.bytesize} bytes; structs must fit in 65535 bytes")
-
-
-def _check_nested(self: _Resolver, obj: Object, d: _ObjDecl) -> None:
-    for f in obj.fields:
-        nested = f.attributes.get("nested_flatbuffer")
-        if nested is not None:
-            if f.type.base != BaseType.VECTOR or f.type.element != BaseType.UBYTE:
-                raise SchemaError(f"{d.file}: nested_flatbuffer field {obj.name}.{f.name} must be [ubyte]")
-            self.lookup(nested, d.namespace, d.file)
-
-
-_Resolver.layout_struct = _layout_struct
-_Resolver.check_nested = _check_nested
 
 
 # --------------------------------------------------------------------------

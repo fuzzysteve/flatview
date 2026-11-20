@@ -62,7 +62,14 @@ library itself has no runtime dependencies; keep it that way.
   bytes, size included (see google/flatbuffers#9413).
 - The verifier's defaults match flatc's C++ verifier (fields are bounded by the buffer).
   `strict_table_size=True` is the stricter flatcc-style check. Alignment is relative to
-  the start of the whole buffer, so size-prefixed and nested buffers carry a `base`.
+  the start of the whole buffer, so size-prefixed buffers carry a `base` (4). Nested
+  flatbuffers are verified on their own (base 0, as flatc's fresh nested Verifier), and the
+  encoder aligns them to their own minalign, as flatc's `ForceVectorAlignment` does.
+- Identifier checks apply whenever the root is the schema's root type, however it was
+  named (`root=None`, its name, or the Object); other root tables have no identifier.
+- `.bfbs` `validate()` makes every structural check the `.fbs` parser makes that the
+  reader relies on (e.g. `nested_flatbuffer` only on `[ubyte]` naming a table, union
+  vectors paired with a `_type` vector of the same union).
 - Lazily built per-schema state must be thread-safe. View classes are built under
   `_BUILD_LOCK` and published on the `Object` only when complete (`_BUILDING` holds the
   in-progress class for the building thread). Python enums are built once under

@@ -245,9 +245,24 @@ def validate(schema: Schema) -> None:
                 else:
                     check_ref(owner, t.base, t, False)
                 if t.item == BaseType.UNION:
+                    # same shape (scalar/vector) and the same union, or readers misread it
                     tf = o.fields_by_name.get(f.name + "_type")
-                    if tf is None or tf.type.item != BaseType.UTYPE:
+                    if (tf is None or tf.type.item != BaseType.UTYPE or tf.type.base != (
+                            BaseType.VECTOR if t.base == BaseType.VECTOR else BaseType.UTYPE)
+                            or tf.type.ref is not t.ref):
                         fail(f"{owner}: union field without a matching {f.name}_type field")
+                nested = f.attributes.get("nested_flatbuffer")
+                if nested is not None:
+                    # as the .fbs parser: reader and verifier only agree on [ubyte]
+                    if t.base != BaseType.VECTOR or t.element != BaseType.UBYTE:
+                        fail(f"{owner}: nested_flatbuffer field must be [ubyte]")
+                    from ._reader import _resolve_in
+                    try:
+                        target = _resolve_in(schema, nested, o.namespace)
+                    except (KeyError, SchemaError):
+                        target = None
+                    if target is None or target.is_struct:
+                        fail(f"{owner}: nested_flatbuffer {nested!r} is not a table in the schema")
                 if f.key and not (t.base.is_scalar or t.base == BaseType.STRING):
                     fail(f"{owner}: key field must be a scalar or string")
 

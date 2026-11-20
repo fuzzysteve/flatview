@@ -817,3 +817,50 @@ def test_capped_reads_allocate_only_what_they_read(tmp_path, kind):
 def _gz(data: bytes) -> bytes:
     z = zlib.compressobj(9, zlib.DEFLATED, 31)
     return z.compress(data) + z.flush()
+
+
+# -- .bfbs layout checks the .fbs parser already makes -------------------------
+
+def _crafted_bfbs(tmp_path, src: str, mutate) -> bytes:
+    """flatc's .bfbs for ``src`` (with built-in attributes), edited by ``mutate``."""
+    p = tmp_path / "s.fbs"
+    p.write_text(src)
+    refl = flatview.reflection_schema()
+    raw = refl.read(flatc_bfbs(p, builtins=True))._asdict(defaults=False, enums="value")
+    mutate({o["name"]: {f["name"]: f for f in o.get("fields", [])} for o in raw["objects"]})
+    return refl.encode(raw)
+
+
+NESTED_SRC = 'table I { x: int; } table O { n: [ubyte] (nested_flatbuffer: "I"); s: [string]; } root_type O;'
+
+
+@needs_flatc
+def test_bfbs_nested_flatbuffer_only_on_ubyte_vectors(tmp_path):
+    # the verifier checked [string] as strings while the reader parsed it as a nested buffer
+    def move(objs):
+        objs["O"]["s"]["attributes"] = objs["O"]["n"].pop("attributes")
+    with pytest.raises(SchemaError, match=r"O\.s: nested_flatbuffer field must be \[ubyte\]"):
+        flatview.load_bfbs(_crafted_bfbs(tmp_path, NESTED_SRC, move))
+
+
+@needs_flatc
+@pytest.mark.parametrize("target", ["Nope", "P"])
+def test_bfbs_nested_flatbuffer_target_must_be_a_table(tmp_path, target):
+    def retarget(objs):
+        for kv in objs["O"]["n"]["attributes"]:
+            if kv["key"] == "nested_flatbuffer":
+                kv["value"] = target
+    src = NESTED_SRC.replace("table O", "struct P { a: int; } table O")
+    with pytest.raises(SchemaError, match="is not a table in the schema"):
+        flatview.load_bfbs(_crafted_bfbs(tmp_path, src, retarget))
+
+
+@needs_flatc
+def test_bfbs_union_vector_needs_a_type_vector(tmp_path):
+    def scalarise(objs):
+        t = objs["T"]["v_type"]["type"]
+        t["base_type"] = int(flatview.BaseType.UTYPE)
+        t.pop("element", None)
+    src = "table M { x: int; } union U { M } table T { v: [U]; } root_type T;"
+    with pytest.raises(SchemaError, match="without a matching v_type field"):
+        flatview.load_bfbs(_crafted_bfbs(tmp_path, src, scalarise))

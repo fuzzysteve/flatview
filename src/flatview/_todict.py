@@ -56,6 +56,16 @@ def _generic_table(schema: Schema, obj: Object, defaults: bool, enums: str,
     return convert
 
 
+def _bad_vtable(pos: int):
+    from ._reader import FlatBufferError
+    raise FlatBufferError(f"vtable of table at {pos} is before the start of the buffer")
+
+
+def _bad_union_vector(pos: int):
+    from ._reader import FlatBufferError
+    raise FlatBufferError(f"table at {pos}: union type vector missing or length mismatch")
+
+
 def _int(x: Any) -> int:
     """Guard for every number interpolated into generated source."""
     if type(x) is not int:
@@ -99,6 +109,8 @@ class _Gen:
             "unpack_from": struct.unpack_from,
             "str": str,
             "NotImplementedError": NotImplementedError,
+            "bad_vtable": _bad_vtable,
+            "bad_union_vector": _bad_union_vector,
         }
         self.names: dict[str, str] = {}   # object name -> converter function name
         self.consts = 0
@@ -144,8 +156,11 @@ class _Gen:
             fn = py if self.enums == "member" else _flag_namer(enum_)
             return f"{self.const(fn, 'F')}({expr})"
         table = {v.value: (py(v.value) if self.enums == "member" else v.name) for v in enum_.values}
-        g = self.const(table.get, "E")
-        return f"{g}({expr}, {expr})" if expr.isidentifier() else f"(lambda _v: {g}(_v, _v))({expr})"
+        get = table.get
+        if expr.isidentifier():
+            return f"{self.const(get, 'E')}({expr}, {expr})"
+        # one function, made once (not a lambda per call): unknown values stay ints
+        return f"{self.const(lambda v: get(v, v), 'E')}({expr})"
 
     def enum_value(self, enum_: Enum | None, raw: Any) -> Any:
         if enum_ is None or raw is None or self.enums == "value":
@@ -229,6 +244,8 @@ class _Gen:
         nslots = max((_int(f.id) for f in obj.fields), default=-1) + 1
         lines = [f"def {name}(buf, pos):",
                  "    vt = pos - i32(buf, pos)[0]",
+                 "    if vt < 0:",
+                 "        bad_vtable(pos)",
                  "    d = {}"]
         if nslots:
             full, vtd, z = self.vt_reader(nslots)
@@ -324,7 +341,14 @@ class _Gen:
         if el == BaseType.UNION:
             tf = obj.fields_by_name[f.name + "_type"]
             members = self.union_members(t.ref)
-            return [f"tp = pos + e[{_int(tf.id)}]", "tp += u32(buf, tp)[0]",
+            return [f"tp = e[{_int(tf.id)}]",
+                    # as the views: a missing or mis-sized type vector is an error
+                    "if not tp:",
+                    "    bad_union_vector(pos)",
+                    "tp += pos",
+                    "tp += u32(buf, tp)[0]",
+                    "if u32(buf, tp)[0] != n:",
+                    "    bad_union_vector(pos)",
                     f"d[{key}] = [({members}.get(buf[tp + 4 + i]) or (lambda b, x: None))(buf, q + u32(buf, q)[0]) "
                     f"for i, q in enumerate(range(p + 4, p + 4 + 4 * n, 4))]"]
         return [f"raise NotImplementedError({'vector of ' + el.name!r})"]

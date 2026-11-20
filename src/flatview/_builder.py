@@ -38,6 +38,7 @@ class Builder:
         self.minalign = 1
         self.vtables: dict[bytes, int] = {}
         self.strings: dict[str, int] = {}
+        self.output = b""            # set by _encode() once finished
 
     # -- primitives ----------------------------------------------------------
     def offset(self) -> int:
@@ -207,7 +208,10 @@ class _Encoder:
         if base.is_float:
             if isinstance(v, bool) or not isinstance(v, (int, float)):
                 raise EncodeError(path, f"expected a number, got {v!r}")
-            v = float(v)
+            try:
+                v = float(v)
+            except OverflowError:
+                raise EncodeError(path, f"{v} does not fit in a {base.name.lower()}") from None
             if base == BaseType.FLOAT and not math.isinf(v) and not math.isnan(v) and abs(v) > 3.4028234663852886e38:
                 raise EncodeError(path, f"{v} does not fit in a float")
             return v
@@ -324,10 +328,7 @@ class _Encoder:
                             items.append((f.id, "B", inferred, 1))
                 continue
             if base.is_scalar:
-                val = self.scalar(base, t.enum, fv, fpath)
-                if base == BaseType.UTYPE:
-                    if isinstance(fv, str):
-                        val = self.enum_from_name(t.ref, fv, fpath)
+                val = self.scalar(base, t.enum, fv, fpath)     # also maps enum/union type names
                 if not f.optional and not self.force_defaults and val == f.default and not (
                         isinstance(val, float) and math.copysign(1, val) != math.copysign(1, f.default or 0.0)):
                     continue
@@ -385,12 +386,17 @@ class _Encoder:
         t = f.type
         el = t.element
         nested = f.attributes.get("nested_flatbuffer")
+        nested_align = 8
         if nested is not None and not isinstance(value, (bytes, bytearray, memoryview, list, tuple)):
             from ._reader import _resolve_in
             target = _resolve_in(self.schema, nested, obj.namespace)
-            value = encode(self.schema, value, target, sort_keys=self.sort_keys,
-                           share_strings=self.share, force_defaults=self.force_defaults,
-                           strict=self.strict, file_identifier=False)
+            b = _encode(self.schema, value, target, sort_keys=self.sort_keys,
+                        share_strings=self.share, force_defaults=self.force_defaults,
+                        strict=self.strict, file_identifier=False)
+            value = b.output
+            # As flatc (ForceVectorAlignment to the nested builder's minalign):
+            # the nested buffer's start must be as aligned as its contents.
+            nested_align = max(8, b.minalign)
         if isinstance(value, (str, Mapping)):
             raise EncodeError(path, f"expected a sequence for vector {t.describe()}, got {type(value).__name__}")
         if nested is not None and len(value) == 0:
@@ -403,10 +409,7 @@ class _Encoder:
                 items = list(bytes(value)) if el == BaseType.UBYTE else list(struct.unpack(f"<{len(value)}b", value))
             else:
                 items = [self.scalar(el, t.enum, x, f"{path}[{i}]") for i, x in enumerate(value)]
-            if el == BaseType.UTYPE:
-                items = [self.enum_from_name(t.ref, x, f"{path}[{i}]") if isinstance(x, str) else x
-                         for i, x in enumerate(value)]
-            return self.b.create_scalar_vector(el, items, 8 if nested is not None else None)
+            return self.b.create_scalar_vector(el, items, nested_align if nested is not None else None)
         value = list(value)
         if el == BaseType.STRING:
             offs = []
@@ -481,6 +484,16 @@ def encode(schema: Schema, value: Any, root: str | Object | None = None, *,
     force_defaults:  write scalar fields even when equal to their default.
     strict:          reject unknown field names.
     """
+    return _encode(schema, value, root, file_identifier=file_identifier, size_prefixed=size_prefixed,
+                   sort_keys=sort_keys, share_strings=share_strings, force_defaults=force_defaults,
+                   strict=strict, initial_size=initial_size).output
+
+
+def _encode(schema: Schema, value: Any, root: str | Object | None, *,
+            file_identifier: bool | str | bytes = True, size_prefixed: bool = False,
+            sort_keys: bool = True, share_strings: bool = True, force_defaults: bool = False,
+            strict: bool = True, initial_size: int = 1024) -> Builder:
+    """encode(), returning the finished Builder (``.output``, ``.minalign``)."""
     obj = schema.object(root)
     if obj.is_struct:
         raise SchemaError("the root of a buffer must be a table")
@@ -495,4 +508,5 @@ def encode(schema: Schema, value: Any, root: str | Object | None = None, *,
         ident = None
     else:
         ident = file_identifier
-    return b.finish(root_off, ident, size_prefixed)
+    b.output = b.finish(root_off, ident, size_prefixed)
+    return b
