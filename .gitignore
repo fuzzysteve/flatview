@@ -6,3 +6,4 @@ dist/
 tests/data/sde-full/
 fuzz/.cache/
 .tools/
+.env
