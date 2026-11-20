@@ -15,11 +15,13 @@ import base64
 import json
 import math
 import re
+import struct
 import sys
 import time
 from typing import Any
 
-from . import Schema, TableVector, Vector, VerificationError, load_schema, open as fv_open
+from . import (EncodeError, FlatBufferError, Schema, SchemaError, TableVector, Vector, VerificationError,
+               load_schema, open as fv_open)
 from ._reader import TableView
 
 
@@ -86,7 +88,8 @@ def _main_vector(root: TableView) -> TableVector | None:
 
 
 def cmd_info(args) -> int:
-    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed)
+    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed,
+                 verify=not args.no_verify)
     s = fb.schema
     print(_show(f"file:    {args.file} ({len(fb.data):,} bytes uncompressed)"))
     print(_show(f"schema:  {s.source}"))
@@ -112,7 +115,8 @@ def cmd_info(args) -> int:
 
 
 def cmd_get(args) -> int:
-    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed)
+    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed,
+                 verify=not args.no_verify)
     vec = _pick(fb.root, args.path) if args.path else _main_vector(fb.root)
     if not isinstance(vec, TableVector) or vec.key_field is None:
         print("error: no keyed vector to look up in (use --path)", file=sys.stderr)
@@ -131,7 +135,8 @@ def cmd_get(args) -> int:
 
 
 def cmd_dump(args) -> int:
-    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed)
+    fb = fv_open(args.file, args.schema, size_prefixed=args.size_prefixed,
+                 verify=not args.no_verify)
     target = _pick(fb.root, args.path)
     if args.jsonl:
         if not isinstance(target, Vector):
@@ -202,19 +207,24 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("-s", "--schema", help=".fbs/.bfbs (default: next to the file)")
         sp.add_argument("--size-prefixed", action="store_true", help="buffer starts with a 4-byte length")
 
+    def reading(sp):
+        common(sp)
+        sp.add_argument("--no-verify", action="store_true",
+                        help="read without verifying the file first (it may be corrupt or hostile)")
+
     sp = sub.add_parser("info", help="summarise a file and its schema")
-    common(sp)
+    reading(sp)
     sp.set_defaults(fn=cmd_info)
 
     sp = sub.add_parser("get", help="look up one row by key")
-    common(sp)
+    reading(sp)
     sp.add_argument("key")
     sp.add_argument("--path", help="dotted path to the vector (default: the root's only table vector)")
     sp.add_argument("--defaults", action="store_true", help="include absent fields at their defaults")
     sp.set_defaults(fn=cmd_get)
 
     sp = sub.add_parser("dump", help="convert to JSON / JSON Lines")
-    common(sp)
+    reading(sp)
     sp.add_argument("--path", help="dotted path to dump, e.g. rows or rows.0.name")
     sp.add_argument("--jsonl", action="store_true", help="one JSON object per vector element")
     sp.add_argument("--limit", type=int)
@@ -244,6 +254,21 @@ def main(argv: list[str] | None = None) -> int:
         return args.fn(args)
     except BrokenPipeError:
         return 0
+    except VerificationError as e:
+        what = args.file if hasattr(args, "file") else "input"
+        print(_show(f"error: {what} is not a valid FlatBuffer for this schema: {e}"
+                    + ("\n(--no-verify reads it anyway)" if hasattr(args, "no_verify") else "")),
+              file=sys.stderr)
+        return 1
+    except (FlatBufferError, SchemaError, EncodeError, struct.error, UnicodeDecodeError, IndexError,
+            OSError) as e:
+        # one line, never a traceback: reading unverified data can fail anywhere
+        if isinstance(e, (struct.error, IndexError, UnicodeDecodeError)) and hasattr(args, "file"):
+            msg = f"error: cannot read {args.file} (corrupt? `flatview verify` says where): {e}"
+        else:
+            msg = f"error: {e}"
+        print(_show(msg), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

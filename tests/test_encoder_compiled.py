@@ -55,7 +55,7 @@ BAD = [
 def both(schema, value, **kw):
     """(compiled result, general result): bytes or the error's text."""
     def run():
-        schema.__dict__.pop("_encoders", None)
+        schema._clear_compiled()
         try:
             return schema.encode(value, **kw)
         except EncodeError as e:
@@ -67,7 +67,7 @@ def both(schema, value, **kw):
         general = run()
     finally:
         fb.WIDE_TABLE = old
-        schema.__dict__.pop("_encoders", None)
+        schema._clear_compiled()
     return compiled, general
 
 

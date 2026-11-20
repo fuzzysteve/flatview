@@ -72,12 +72,12 @@ def _result(schema, data, **kw) -> str:
 def _general(schema, data, **kw) -> str:
     old = fv.WIDE_TABLE
     fv.WIDE_TABLE = -1
-    schema.__dict__.pop("_verifiers", None)
+    schema._clear_compiled()
     try:
         return _result(schema, data, **kw)
     finally:
         fv.WIDE_TABLE = old
-        schema.__dict__.pop("_verifiers", None)
+        schema._clear_compiled()
 
 
 @pytest.mark.parametrize("name,schema,data,extra", SAMPLES, ids=[s[0] for s in SAMPLES])

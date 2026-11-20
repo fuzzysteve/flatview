@@ -5,6 +5,7 @@ Several threads touching a fresh schema at once must never see a half-built
 class, and must all get the same enum class (so `is` checks hold).
 """
 
+import struct
 import sys
 import threading
 
@@ -62,3 +63,27 @@ def test_one_python_enum_class_per_enum():
 def test_compiled_converters_concurrently():
     for results in hammer(lambda root: root._asdict()["a"][2]["f59"]):
         assert results == [2] * 8
+
+
+def test_compiled_encoders_concurrently():
+    value = {"a": [{"k": i, "f59": i, "c": 1} for i in range(3)]}
+    want = flatview.parse_fbs(SRC).encode(value)
+    for results in hammer(lambda root: root._schema.encode(value)):
+        assert results == [want] * 8
+
+
+def test_compiled_verifiers_concurrently():
+    def verify(root):
+        data = bytes(root._buf.obj)
+        root._schema.verify(data)
+        bad = bytearray(data)
+        p = root._field_offset("a")
+        vec = p + struct.unpack_from("<I", data, p)[0]
+        struct.pack_into("<I", bad, vec + 4, 0x7FFFFFF0)   # a[0] points far outside: same error everywhere
+        try:
+            root._schema.verify(bytes(bad))
+            return "OK"
+        except flatview.VerificationError as e:
+            return str(e)
+    for results in hammer(verify):
+        assert len(set(results)) == 1 and results[0] != "OK"

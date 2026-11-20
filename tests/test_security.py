@@ -65,7 +65,7 @@ def test_converters_never_embed_schema_names():
     s.objects["A"].fields[0].name = "x'] = 1; import builtins; builtins.FLATVIEW_PWNED = True; d['"
     s.objects["A"]._by_name = None
     s.objects["A"].view_class = None
-    s.__dict__.pop("_converters", None)
+    s._clear_compiled()
     assert list(s.read(data)._asdict()) == [s.objects["A"].fields[0].name]
 
 
@@ -404,9 +404,9 @@ def test_generic_and_compiled_converters_agree(kitchen_schema, monkeypatch, opts
          "cargo": [{"name": "c"}], "blueprint": blueprint_bytes(kitchen_schema), "maybe": True}]})
     compiled = kitchen_schema.read(data)._asdict(**opts)
     monkeypatch.setattr(td, "WIDE_TABLE", 0)
-    kitchen_schema.__dict__.pop("_converters", None)
+    kitchen_schema._clear_compiled()
     generic = kitchen_schema.read(data)._asdict(**opts)
-    kitchen_schema.__dict__.pop("_converters", None)
+    kitchen_schema._clear_compiled()
     assert generic == compiled
 
 

@@ -313,6 +313,12 @@ flatview verify catalog.shop --strict-enums -s shop.fbs
 flatview schema shop.bfbs                     # print a binary schema as .fbs
 ```
 
+`info`, `get` and `dump` verify the file before reading it, so a corrupt or
+hostile file gets a one-line error naming the bad offset, not partial output
+and a traceback. `--no-verify` skips that (for a file known to be good, or to
+read what can still be read from a damaged one). `dump` round-trips through
+`encode`, including NaN and infinities, which JSON spells as `"nan"`/`"inf"`.
+
 ## Security
 
 flatview is written to handle untrusted input. What that covers, and what

@@ -606,8 +606,9 @@ class _Encoder:
                 return (k or "").encode("utf-8") if isinstance(k, str) else (k or b"")
             if k is None:
                 return kf.default or 0
-            if isinstance(k, str) and kf.type.enum is not None:
-                return self.enum_from_name(kf.type.enum, k, path)
+            # sort on the value that will be written: the same conversion as the
+            # field itself (enum names, "inf"/"nan" strings, ints for floats...)
+            k = self.scalar(kf.type.base, kf.type.enum, k, f"{path}[{pair[0]}].{kf.name}")
             if isinstance(k, float) and math.isnan(k):
                 # NaN is unordered: a vector containing it can't be sorted, and
                 # binary search over it (ours, or flatc's LookupByKey) misbehaves
@@ -644,11 +645,10 @@ def table_encoder(schema: Schema, obj: Object, strict: bool, force_defaults: boo
     checks and raise the same errors. Schema-derived text never enters the
     source: names and fields are namespace constants, numbers pass _int().
     """
-    cache = schema.__dict__.setdefault("_encoders", {})
-    key = (obj, bool(strict), bool(force_defaults))   # by identity, as _todict.converter
-    fn = cache.get(key)
+    key = ("encoder", bool(strict), bool(force_defaults))   # on the Object, as _todict.converter
+    fn = obj.compiled.get(key)
     if fn is None:
-        fn = cache[key] = _compile_table(obj, bool(strict), bool(force_defaults))
+        fn = obj.compiled[key] = _compile_table(obj, bool(strict), bool(force_defaults))
     return fn
 
 

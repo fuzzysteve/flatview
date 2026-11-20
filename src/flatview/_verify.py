@@ -384,11 +384,10 @@ def table_verifier(schema: Schema, obj: Object, align: bool, strict_size: bool, 
     enters the source: names and objects are constants, numbers pass _int().
     """
     opts = (bool(align), bool(strict_size), bool(utf8), bool(check_sorted), bool(strict_enums))
-    cache = schema.__dict__.setdefault("_verifiers", {})
-    key = (obj, *opts)       # by identity, as _todict.converter
-    fn = cache.get(key)
+    key = ("verifier", *opts)       # on the Object, as _todict.converter
+    fn = obj.compiled.get(key)
     if fn is None:
-        fn = cache[key] = _compile_table(obj, *opts)
+        fn = obj.compiled[key] = _compile_table(obj, *opts)
     return fn
 
 

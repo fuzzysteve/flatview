@@ -151,11 +151,11 @@ def test_table_over_64k_is_an_encode_error(monkeypatch, wide):
     import flatview._builder as fb
     if wide:                                   # the field-by-field path too
         monkeypatch.setattr(fb, "WIDE_TABLE", 0)
-        BIG.__dict__.pop("_encoders", None)
+        BIG._clear_compiled()
     v = {"a": [0] * 40000}
     with pytest.raises(EncodeError, match=r"table T: 80,0\d\d bytes of inline data"):
         BIG.encode({"x": v, "y": v})
-    BIG.__dict__.pop("_encoders", None)
+    BIG._clear_compiled()
     assert BIG.read(BIG.encode({"x": v})).x.a[0] == 0       # one struct fits
 
 
@@ -173,3 +173,46 @@ def test_other_strings_are_still_not_floats():
     for bad in ("1.5", "nope", ""):
         with pytest.raises(EncodeError, match="expected a number"):
             s.encode({"d": bad})
+
+
+FKEY = parse_fbs("table R { k: double (key); } table T { rs: [R]; } root_type T;")
+
+
+@pytest.mark.parametrize("keys,want", [
+    (["+inf", "-inf", 1, 2.5], [float("-inf"), 1.0, 2.5, float("inf")]),
+    (["inf", 5.0, "-Infinity"], [float("-inf"), 5.0, float("inf")]),
+])
+def test_float_keys_sorted_by_their_value(keys, want):
+    # keys were sorted as the raw strings ("+inf" < "-inf"), so the encoder
+    # wrote vectors its own verifier rejected as unsorted
+    data = FKEY.encode({"rs": [{"k": k} for k in keys]})
+    FKEY.verify(data)
+    assert FKEY.read(data).rs.keys() == want
+
+
+@pytest.mark.parametrize("nan", ["nan", "-NaN", float("nan")])
+def test_nan_key_refused_however_spelled(nan):
+    with pytest.raises(EncodeError, match=r"rs\[0\]\.k: NaN cannot be used as a key"):
+        FKEY.encode({"rs": [{"k": nan}]})
+
+
+def test_bad_key_type_names_the_key():
+    with pytest.raises(EncodeError, match=r"rs\[1\]\.k: expected a number"):
+        FKEY.encode({"rs": [{"k": 1}, {"k": "x"}]})
+
+
+def test_foreign_tables_are_not_kept_alive():
+    # compiled code lives on its table, so using another schema's table via
+    # root= leaves nothing of it (or its schema) in this schema
+    import gc
+    import weakref
+    a = parse_fbs("table X { s: string; } root_type X;")
+    b = parse_fbs("table X { n: int; } root_type X;")
+    data = b.encode({"n": 1})
+    a.verify(data, b.root)
+    a.read(data, b.root)._asdict()
+    a.encode({"n": 2}, b.root)
+    gone = weakref.ref(b.root)
+    del b
+    gc.collect()
+    assert gone() is None

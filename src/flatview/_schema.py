@@ -186,6 +186,11 @@ class Object:
         self._by_name: dict[str, Field] | None = None
         self._key: Field | None | bool = False
         self.view_class: type | None = None  # filled lazily by the reader
+        # Compiled converters/encoders/verifiers for this table, by kind and
+        # options. They live on the Object (as the view class does), so they
+        # belong to this table and go away with it: a schema never holds code,
+        # or Objects, of another schema's table used through root=.
+        self.compiled: dict[tuple, Any] = {}
 
     @property
     def short_name(self) -> str:
@@ -358,6 +363,11 @@ class Schema:
         if not isinstance(obj, Object):
             raise KeyError(f"{name!r} is an enum, not a table or struct")
         return obj
+
+    def _clear_compiled(self) -> None:
+        """Drop every compiled converter/encoder/verifier (tests, schema edits)."""
+        for o in self.objects.values():
+            o.compiled.clear()
 
     def __repr__(self) -> str:
         root = self.root.name if self.root else None

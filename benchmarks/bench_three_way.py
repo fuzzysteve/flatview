@@ -14,6 +14,13 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
+import get_flatc  # noqa: E402
+
+# the pinned flatc (scripts/get_flatc.py), as the tests and fuzzers use, so the
+# generated official code matches the flatbuffers package version
+FLATC = get_flatc.resolve() or sys.exit("no flatc: run scripts/get_flatc.py")
+
 FB = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "tests", "data", "sde-full")
 JL = sys.argv[2] if len(sys.argv) > 2 else "/opt/sde/files"
 
@@ -100,7 +107,7 @@ def run(gen: str, code: str) -> tuple[float, int]:
 
 def main():
     gen = tempfile.mkdtemp(prefix="fb3way")
-    subprocess.run(["flatc", "--python", "--gen-object-api", "-o", gen, f"{FB}/types.fbs"],
+    subprocess.run([FLATC, "--python", "--gen-object-api", "-o", gen, f"{FB}/types.fbs"],
                    check=True, capture_output=True)
     print(f"types.fb {os.path.getsize(f'{FB}/types.fb') / 1e6:.0f} MB, "
           f"types.jsonl {os.path.getsize(f'{JL}/types.jsonl') / 1e6:.0f} MB (same SDE build)\n")

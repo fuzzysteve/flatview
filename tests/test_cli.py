@@ -116,3 +116,33 @@ def test_dump_output_encodes_again(tmp_path, capsys):
     assert main(["encode", str(tmp_path / "s.fbs"), str(tmp_path / "x.json"), "-o", str(tmp_path / "y.bin")]) == 0
     again = s.read((tmp_path / "y.bin").read_bytes())
     assert math.isnan(again.a) and again.b == float("-inf") and again.c.tolist() == [float("inf"), 1.5]
+
+
+def _corrupt_categories(tmp_path):
+    import shutil
+    import struct
+    import flatview
+    data = bytearray(flatview.read_bytes(SDE / "categories.fb"))
+    struct.pack_into("<I", data, 200, 0x7FFFFFF0)              # one row's offset now points far away
+    (tmp_path / "bad.fb").write_bytes(data)
+    shutil.copy(SDE / "categories.bfbs", tmp_path / "bad.bfbs")
+    return str(tmp_path / "bad.fb")
+
+
+@pytest.mark.parametrize("args", [["dump", "--jsonl"], ["info"], ["get", "45"]])
+def test_reading_commands_verify_first(tmp_path, capsys, args):
+    bad = _corrupt_categories(tmp_path)
+    assert main([args[0], bad, *args[1:]]) == 1
+    out, err = capsys.readouterr()
+    assert out == "" and "Traceback" not in err
+    assert "is not a valid FlatBuffer for this schema: rows[44]: offset to table points outside" in err
+    assert "--no-verify" in err
+
+
+def test_no_verify_reads_until_it_fails_cleanly(tmp_path, capsys):
+    bad = _corrupt_categories(tmp_path)
+    assert main(["dump", bad, "--jsonl", "--no-verify"]) == 1
+    out, err = capsys.readouterr()
+    assert len(out.splitlines()) == 44                          # the rows before the damage
+    assert err.startswith("error: cannot read") and "flatview verify" in err
+    assert main(["dump", bad, "--jsonl", "--limit", "3", "--no-verify"]) == 0

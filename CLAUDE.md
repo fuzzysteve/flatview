@@ -101,8 +101,10 @@ library itself has no runtime dependencies; keep it that way.
 - Treat `.bfbs` files and buffers as untrusted. **Never interpolate schema-derived
   text into generated source** in `_todict.py` or the compiled encoder and verifier. Use
   indexes, `repr()`, or `const()` values only; integers come from struct unpacking and
-  pass `_int()`. Compiled-code caches are keyed by the `Object` itself, never its name:
-  `root=` may be another schema's table of the same name.
+  pass `_int()`. Compiled code is cached on the table it was compiled for
+  (`Object.compiled`, by kind and options), never by name in a schema: `root=` may be
+  another schema's table of the same name, and a schema must not keep that alive.
+  `Schema._clear_compiled()` drops it all (tests).
   Nested-flatbuffer roots are resolved once at load (`Field.nested`, set by the parser and
   `validate()`); readers, converters, encoder and verifier use `nested_target()`, never a
   name lookup in the calling schema.

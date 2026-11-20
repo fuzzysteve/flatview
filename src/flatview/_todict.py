@@ -389,13 +389,12 @@ def converter(schema: Schema, obj: Object, defaults: bool = True, enums: str = "
     """
     if enums not in ("member", "name", "value"):
         raise ValueError("enums must be 'member', 'name' or 'value'")
-    cache = schema.__dict__.setdefault("_converters", {})
-    # keyed by the Object itself, not its name: root= may be another schema's
-    # table of the same name, which must never get this one's converter
-    key = (obj, bool(defaults), enums, bool(deprecated), bool(raw))
-    fn = cache.get(key)
+    # cached on the Object itself (never by name: root= may be another
+    # schema's table of the same name, which must never get this one's code)
+    key = ("converter", bool(defaults), enums, bool(deprecated), bool(raw))
+    fn = obj.compiled.get(key)
     if fn is None:
-        fn = cache[key] = _compile(schema, obj, bool(defaults), enums, bool(deprecated), bool(raw))
+        fn = obj.compiled[key] = _compile(schema, obj, bool(defaults), enums, bool(deprecated), bool(raw))
     return fn
 
 

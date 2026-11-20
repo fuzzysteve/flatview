@@ -13,6 +13,13 @@ import random
 import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
+import get_flatc  # noqa: E402
+
+# the pinned flatc (scripts/get_flatc.py), as the tests and fuzzers use, so the
+# generated official code matches the flatbuffers package version
+FLATC = get_flatc.resolve() or sys.exit("no flatc: run scripts/get_flatc.py")
 import time
 
 import flatview
@@ -30,7 +37,7 @@ def best(fn, repeat=3):
 
 
 def gen_official(tmp, table):
-    subprocess.run(["flatc", "--python", "--gen-object-api", "-o", tmp, os.path.join(SDE, table + ".fbs")],
+    subprocess.run([FLATC, "--python", "--gen-object-api", "-o", tmp, os.path.join(SDE, table + ".fbs")],
                    check=True, capture_output=True)
 
 
