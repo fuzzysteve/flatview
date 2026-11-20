@@ -527,8 +527,8 @@ class _Encoder:
         nested = f.attributes.get("nested_flatbuffer")
         nested_align = 8
         if nested is not None and not isinstance(value, (bytes, bytearray, memoryview, list, tuple)):
-            from ._reader import _resolve_in
-            target = _resolve_in(self.schema, nested, obj.namespace)
+            from ._reader import nested_target
+            target = nested_target(self.schema, obj, f)
             b = _encode(self.schema, value, target, sort_keys=self.sort_keys,
                         share_strings=self.share, force_defaults=self.force_defaults,
                         strict=self.strict, file_identifier=False)

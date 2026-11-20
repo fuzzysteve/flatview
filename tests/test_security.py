@@ -909,3 +909,40 @@ def test_compiled_caches_never_mix_tables_of_the_same_name():
     assert b.read(data_b)._asdict() == {"n": 12345}
     with pytest.raises(flatview.EncodeError, match="unknown field"):
         a.encode({"n": 7})                                     # a.X's own encoder
+
+
+NESTED_A = 'table I { x: int; } table O { n: [ubyte] (nested_flatbuffer: "I"); } root_type O;'
+NESTED_B = 'table I { s: string; } table O { n: [ubyte] (nested_flatbuffer: "I"); } root_type O;'
+
+
+@pytest.mark.parametrize("first", ["own", "foreign"])
+def test_nested_flatbuffer_target_belongs_to_its_own_schema(first):
+    # The nested root "I" used to be looked up in whichever schema first used
+    # the table (views) or was doing the work (converters, encoder, verifier).
+    a, b = parse_fbs(NESTED_A), parse_fbs(NESTED_B)
+    assert b.root.field("n").nested is b.objects["I"]
+    data_b = b.encode({"n": {"s": "hi"}})
+
+    def through_a():
+        a.verify(data_b, b.root)
+        assert a.read(data_b, b.root).n.s == "hi"
+        assert a.read(data_b, b.root)._asdict() == {"n": {"s": "hi"}}
+        assert a.encode({"n": {"s": "hi"}}, b.root) == data_b
+
+    def own():
+        b.verify(data_b)
+        assert b.read(data_b).n.s == "hi"
+        assert b.read(data_b)._asdict() == {"n": {"s": "hi"}}
+
+    for step in ((own, through_a) if first == "own" else (through_a, own)):
+        step()
+    data_a = a.encode({"n": {"x": 5}})
+    assert a.read(data_a).n.x == 5 and a.read(data_a)._asdict() == {"n": {"x": 5}}
+
+
+@needs_flatc
+def test_bfbs_nested_target_resolved_at_load(tmp_path):
+    p = tmp_path / "b.fbs"
+    p.write_text(NESTED_B)
+    b = flatview.load_bfbs(flatc_bfbs(p, builtins=True))
+    assert b.root.field("n").nested is b.objects["I"]

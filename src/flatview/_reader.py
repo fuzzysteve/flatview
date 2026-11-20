@@ -683,7 +683,7 @@ def _table_getter(schema: Schema, obj: Object, f: Field) -> Callable:
         el = t.element
         nested = f.attributes.get("nested_flatbuffer")
         if nested is not None:
-            target = _resolve_in(schema, nested, obj.namespace)
+            target = nested_target(schema, obj, f)
 
             def get(self):
                 p = locate(self)
@@ -765,6 +765,14 @@ def _union_makers(schema: Schema, union: Enum) -> dict[int, Callable]:
                 return view_class(schema, _sub)(buf, pos)
             makers[v.value] = make
     return makers
+
+
+def nested_target(schema: Schema, obj: Object, f: Field) -> Object:
+    """Root table of ``f``'s nested flatbuffer: the one resolved when the schema
+    was loaded, else (a hand-built schema) looked up by name in ``schema``."""
+    if f.nested is not None:
+        return f.nested
+    return _resolve_in(schema, f.attributes["nested_flatbuffer"], obj.namespace)
 
 
 def _resolve_in(schema: Schema, name: str, ns: str) -> Object:

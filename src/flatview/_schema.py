@@ -158,6 +158,10 @@ class Field:
     padding: int = 0
     attributes: dict[str, str] = dc_field(default_factory=dict)
     documentation: list[str] = dc_field(default_factory=list)
+    #: ``nested_flatbuffer`` fields: the root table of the nested buffer,
+    #: resolved once when the schema is loaded (as flatc keeps a pointer), so
+    #: it never depends on which schema is reading. None elsewhere.
+    nested: "Object | None" = dc_field(default=None, repr=False)
 
     def __repr__(self) -> str:
         flags = [f for f in ("required", "key", "optional", "deprecated") if getattr(self, f)]

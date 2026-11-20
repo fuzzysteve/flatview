@@ -320,9 +320,9 @@ class _Gen:
         el = t.element
         nested = f.attributes.get("nested_flatbuffer")
         if nested is not None:
-            from ._reader import _resolve_in
+            from ._reader import nested_target
             # nested buffers are converted by the memoryview flavour
-            target = self.nested_fn(_resolve_in(self.schema, nested, obj.namespace))
+            target = self.nested_fn(nested_target(self.schema, obj, f))
             return ["nb = memoryview(buf)[p + 4:p + 4 + n]", f"d[{key}] = {target}(nb, u32(nb, 0)[0])"]
         if el.is_scalar:
             fmt = SCALAR_FORMAT[el]

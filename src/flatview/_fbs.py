@@ -901,7 +901,9 @@ class _Resolver:
             if nested is not None:
                 if f.type.base != BaseType.VECTOR or f.type.element != BaseType.UBYTE:
                     raise SchemaError(f"{d.file}: nested_flatbuffer field {obj.name}.{f.name} must be [ubyte]")
-                self.lookup(nested, d.namespace, d.file)
+                target = self.lookup(nested, d.namespace, d.file)
+                if isinstance(target, Object) and not target.is_struct:
+                    f.nested = target
 
 
 _INT_LITERAL = re.compile(r"[-+]?(0[xX][0-9a-fA-F]+|[0-9]+)")

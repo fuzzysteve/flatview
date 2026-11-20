@@ -263,6 +263,7 @@ def validate(schema: Schema) -> None:
                         target = None
                     if target is None or target.is_struct:
                         fail(f"{owner}: nested_flatbuffer {nested!r} is not a table in the schema")
+                    f.nested = target
                 if f.key and not (t.base.is_scalar or t.base == BaseType.STRING):
                     fail(f"{owner}: key field must be a scalar or string")
 

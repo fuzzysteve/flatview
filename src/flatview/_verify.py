@@ -258,8 +258,8 @@ class _Verifier:
             if nested is not None and not n:
                 self.fail(fpath, "nested flatbuffer is empty")
             if nested is not None:
-                from ._reader import _resolve_in
-                target = _resolve_in(self.schema, nested, obj.namespace)
+                from ._reader import nested_target
+                target = nested_target(self.schema, obj, f)
                 # As flatc: a nested buffer is verified on its own, so its
                 # alignment is relative to its own start, not the outer buffer's.
                 sub = _Verifier(self.schema, self.buf[start:start + n], max_depth=self.max_depth - depth,

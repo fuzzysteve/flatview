@@ -103,6 +103,9 @@ library itself has no runtime dependencies; keep it that way.
   indexes, `repr()`, or `const()` values only; integers come from struct unpacking and
   pass `_int()`. Compiled-code caches are keyed by the `Object` itself, never its name:
   `root=` may be another schema's table of the same name.
+  Nested-flatbuffer roots are resolved once at load (`Field.nested`, set by the parser and
+  `validate()`); readers, converters, encoder and verifier use `nested_target()`, never a
+  name lookup in the calling schema.
 - `load_bfbs` must keep verifying the buffer against `reflection.fbs`, rejecting
   non-identifier names, and running `validate()` (layout sanity) before returning.
 - Every new kind of offset the verifier follows must go through `deref()`, so it counts
