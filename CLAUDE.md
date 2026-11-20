@@ -15,6 +15,7 @@ uv run python scripts/fetch_sde_examples.py   # download SDE .fb/.fbs/.bfbs into
 uv run --group bench python benchmarks/bench_vs_official.py
 uv run --group bench python benchmarks/bench_three_way.py   # also needs the SDE JSONL export (2nd arg)
 uv run --group bench python benchmarks/bench_memory.py
+uv run --group bench python benchmarks/bench_encode.py   # encoder vs official object API Pack
 ```
 
 Cross-checks compare against the latest flatc release, pinned in `scripts/get_flatc.py`
@@ -45,7 +46,11 @@ library itself has no runtime dependencies; keep it that way.
 - `_todict.py`: whole-tree conversion. It generates source for one converter function per
   table and mode and `exec`s it; `_asdict()` and `to_python()` go through it.
 - `_verify.py`: the verifier. `_builder.py`: the back-to-front builder and the
-  schema-driven encoder. `_io.py`: files, gzip/zstd, mmap, schema discovery.
+  schema-driven encoder. The encoder compiles one function per table (`table_encoder`), with the
+  same safety rules as `_todict.py` (names as namespace constants, numbers via `_int()`,
+  `WIDE_TABLE` tables field by field). Its fast paths must give byte-identical output and
+  identical errors to `_Encoder.field` (`tests/test_encoder_compiled.py`); table layouts
+  are cached per present-field pattern (`_table_layout`, bounded). `_io.py`: files, gzip/zstd, mmap, schema discovery.
   `__main__.py`: the CLI.
 
 ## Invariants (tests enforce these; keep them true)

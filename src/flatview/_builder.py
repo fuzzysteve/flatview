@@ -87,14 +87,23 @@ class Builder:
     # -- objects ---------------------------------------------------------------
     def create_string(self, s: str | bytes, share: bool = True) -> int:
         key = s if share and isinstance(s, str) else None
-        if key is not None and key in self.strings:
-            return self.strings[key]
+        if key is not None:
+            off = self.strings.get(key)
+            if off is not None:
+                return off
         b = s.encode("utf-8") if isinstance(s, str) else bytes(s)
-        self.prep(4, len(b) + 1)
-        self.pad(1)
-        self.place_bytes(b)
-        self.place("<I", len(b), 4)
-        off = self.offset()
+        n = len(b)
+        # = prep(4, n + 1); pad(1); place_bytes(b); place("<I", n)
+        if self.minalign < 4:
+            self.minalign = 4
+        pad = (-(len(self.buf) - self.head + n + 1)) % 4
+        self._grow(pad + n + 5)
+        head = self.head - pad - 1 - n
+        self.buf[head:head + n] = b
+        head -= 4
+        _pack_u32(self.buf, head, n)
+        self.head = head
+        off = len(self.buf) - head
         if key is not None:
             self.strings[key] = off
         return off
@@ -111,11 +120,20 @@ class Builder:
         return self.offset()
 
     def create_offset_vector(self, offsets: list[int]) -> int:
-        self.prep(4, 4 * len(offsets))
-        for off in reversed(offsets):
-            self.prepend_uoffset(off)
-        self.place("<I", len(offsets), 4)
-        return self.offset()
+        # = prep(4, 4n), then prepend_uoffset() per element (last first), then the length
+        n = len(offsets)
+        if self.minalign < 4:
+            self.minalign = 4
+        pad = (-(len(self.buf) - self.head)) % 4
+        self._grow(pad + 4 * n + 4)
+        self.head -= pad
+        o0 = len(self.buf) - self.head + 4 * n      # offset of element 0, once written
+        vals = [o0 - 4 * j - off for j, off in enumerate(offsets)]
+        if vals and min(vals) < 4:
+            raise AssertionError("offset must refer to already-written data")
+        self.head -= 4 * n + 4
+        struct.pack_into(f"<{n + 1}I", self.buf, self.head, n, *vals)
+        return len(self.buf) - self.head
 
     def create_struct_vector(self, blobs: list[bytes], bytesize: int, minalign: int) -> int:
         n = len(blobs)
@@ -128,38 +146,48 @@ class Builder:
     def table(self, items: list[tuple[int, str, Any, int]], dedup: bool = True) -> int:
         """Write a table. ``items`` = [(field_id, kind, value, size)] where kind
         is a struct format char, "offset" (value = offset) or "struct" (value =
-        (blob, minalign)). Returns the table's offset."""
-        # Align first, so padding left by the previous object is not counted in
-        # this table's size: identical tables then get identical vtables.
-        self.prep(max([4, *(_align_of(it) for it in items)]), 0)
-        start = self.offset()
-        locs: dict[int, int] = {}
-        # Largest first: they are prepended, so this minimises padding.
-        for fid, kind, value, size in sorted(items, key=lambda it: -_align_of(it)):
-            if kind == "offset":
-                self.prepend_uoffset(value)
-            elif kind == "struct":
-                blob, minalign = value
-                self.prep(minalign, len(blob))
-                self.place_bytes(blob)
-            else:
-                self.prep(size, 0)
-                self.place("<" + kind, value, size)
-            locs[fid] = self.offset()
-        self.prep(4, 0)
-        self.place("<i", 0, 4)
-        obj_off = self.offset()
-        nslots = max(locs) + 1 if locs else 0
-        entries = [obj_off - locs[i] if i in locs else 0 for i in range(nslots)]
-        tsize = obj_off - start
-        vt = struct.pack(f"<{2 + nslots}H", 4 + 2 * nslots, tsize, *entries)
+        (blob, minalign)). Returns the table's offset.
+
+        Layout (see _table_layout): aligned first, so padding left by the
+        previous object is not counted in this table's size, and identical
+        tables get identical vtables; fields largest-alignment first. The
+        layout depends only on which fields are present, so it is cached and
+        the table is written with one pack_into.
+        """
+        key = tuple([(it[0], "struct", len(it[2][0]), it[2][1]) if it[1] == "struct"
+                     else (it[0], it[1], it[3], it[3]) for it in items])
+        lay = _LAYOUTS.get(key)
+        if lay is None:
+            lay = _table_layout(key)
+        return self.write_table(lay, [it[2] for it in items], dedup)
+
+    def write_table(self, lay: tuple, values: list, dedup: bool = True) -> int:
+        """table(), given the layout (from _table_layout) and the values in key order."""
+        align, packer, order, objr, vt = lay
+        if align > self.minalign:
+            self.minalign = align
+        pad = (-(len(self.buf) - self.head)) % align
+        self._grow(pad + objr + len(vt))
+        self.head -= pad
+        base = len(self.buf) - self.head
+        obj_off = base + objr
         existing = self.vtables.get(vt) if dedup else None
+        args = [(existing if existing is not None else obj_off + len(vt)) - obj_off]
+        for i, rloc in order:
+            v = values[i]
+            if rloc > 0:                    # uoffset, from its own position
+                v = base + rloc - v
+                if v < 4:
+                    raise AssertionError("offset must refer to already-written data")
+            elif rloc < 0:                  # struct: its bytes
+                v = v[0]
+            args.append(v)
+        self.head -= objr
+        packer(self.buf, self.head, *args)
         if existing is None:
-            self.place_bytes(vt)  # vtables are 2-aligned; we are 4-aligned here
-            existing = self.offset()
+            self.place_bytes(vt)            # vtables are 2-aligned; we are 4-aligned here
             if dedup:
-                self.vtables[vt] = existing
-        struct.pack_into("<i", self.buf, len(self.buf) - obj_off, existing - obj_off)
+                self.vtables[vt] = obj_off + len(vt)
         return obj_off
 
     def finish(self, root: int, file_identifier: str | bytes | None = None,
@@ -177,11 +205,57 @@ class Builder:
         return bytes(self.buf[self.head:])
 
 
-def _align_of(item) -> int:
-    _, kind, value, size = item
-    if kind == "struct":
-        return value[1]
-    return size
+_pack_u32 = struct.Struct("<I").pack_into
+
+#: table layouts by field pattern, see _table_layout (bounded: cleared when full)
+_LAYOUTS: dict[tuple, tuple] = {}
+
+
+def _table_layout(key: tuple) -> tuple:
+    """Where each field of a table goes, for one pattern of present fields.
+
+    ``key`` = ((field_id, kind, size, align), ...) in the caller's order.
+    Positions are relative: the builder first pads to the largest alignment
+    (at least 4), then prepends fields largest-alignment first (stable),
+    each aligned, then the 4-byte soffset. Returns (align, pack_into for the
+    whole table, [(item index, rloc)] in address order, table size, vtable
+    bytes); rloc is the field's offset-from-end relative to the aligned start
+    for uoffsets, -1 for structs, 0 for scalars.
+    """
+    align = max([4, *(k[3] for k in key)])
+    r = 0
+    locs: dict[int, int] = {}
+    placed = []
+    for i in sorted(range(len(key)), key=lambda i: -key[i][3]):
+        fid, kind, size, a = key[i]
+        if kind == "struct":
+            r += (-(r + size)) % a + size
+        else:
+            r += (-r) % a + size
+        locs[fid] = r
+        placed.append((r, i, size))
+    r += (-r) % 4 + 4
+    objr = r
+    nslots = max(locs) + 1 if locs else 0
+    entries = [objr - locs[f] if f in locs else 0 for f in range(nslots)]
+    vt = struct.pack(f"<{2 + nslots}H", 4 + 2 * nslots, objr, *entries)
+    fmt = ["<i"]
+    pos = 4
+    order = []
+    for at, i, size in sorted((objr - r1, i, size) for r1, i, size in placed):
+        if at > pos:
+            fmt.append(f"{at - pos}x")
+        kind = key[i][1]
+        fmt.append("I" if kind == "offset" else f"{size}s" if kind == "struct" else kind)
+        order.append((i, objr - at if kind == "offset" else -1 if kind == "struct" else 0))
+        pos = at + size
+    if objr > pos:
+        fmt.append(f"{objr - pos}x")
+    lay = (align, struct.Struct("".join(fmt)).pack_into, order, objr, vt)
+    if len(_LAYOUTS) >= 4096:
+        _LAYOUTS.clear()
+    _LAYOUTS[key] = lay
+    return lay
 
 
 # ==========================================================================
@@ -200,6 +274,7 @@ class _Encoder:
         self.share = share_strings
         self.force_defaults = force_defaults
         self.strict = strict
+        self.fns: dict[Object, Any] = {}     # obj -> compiled encoder (see table_encoder)
 
     # -- scalars ---------------------------------------------------------------
     def scalar(self, base: BaseType, enum: Enum | None, v: Any, path: str) -> Any:
@@ -310,66 +385,94 @@ class _Encoder:
         return self._table(obj, v, path)
 
     def _table(self, obj: Object, v: Any, path: str) -> int:
+        if type(v) is not dict:
+            v = self.as_mapping(obj, v, path)
+        fn = self.fns.get(obj)
+        if fn is None:
+            fn = self.fns[obj] = table_encoder(self.schema, obj, self.strict, self.force_defaults)
+        return fn(self, v, path)
+
+    def as_mapping(self, obj: Object, v: Any, path: str) -> Mapping:
         from ._reader import TableView
         if isinstance(v, TableView):
-            v = v._asdict(defaults=False, enums="value", deprecated=True)
-        elif not isinstance(v, Mapping):
-            if hasattr(v, "_asdict"):
-                v = v._asdict()
-            elif hasattr(v, "__dict__"):
-                v = vars(v)
-            else:
-                raise EncodeError(path, f"expected a mapping for table {obj.name}, got {type(v).__name__}")
+            return v._asdict(defaults=False, enums="value", deprecated=True)
+        if isinstance(v, Mapping):
+            return v
+        if hasattr(v, "_asdict"):
+            return v._asdict()
+        if hasattr(v, "__dict__"):
+            return vars(v)
+        raise EncodeError(path, f"expected a mapping for table {obj.name}, got {type(v).__name__}")
+
+    def generic_table(self, obj: Object, v: Mapping, path: str) -> int:
+        """Field by field, for tables too wide to compile (see table_encoder)."""
         if self.strict:
-            unknown = set(v) - set(obj.fields_by_name)
-            if unknown:
-                raise EncodeError(path, f"unknown field(s) for {obj.name}: {sorted(unknown)}")
+            self.check_known(obj, v, path)
         items: list[tuple[int, str, Any, int]] = []
         for f in obj.fields:
-            fpath = f"{path}.{f.name}" if path else f.name
-            fv = v.get(f.name)
-            t = f.type
-            base = t.base
-            if fv is None:
-                if f.required:
-                    raise EncodeError(fpath, "required field is missing")
-                if base == BaseType.UTYPE and t.ref is not None:
-                    vf = obj.fields_by_name.get(f.name[:-5]) if f.name.endswith("_type") else None
-                    if vf is not None and v.get(vf.name) is not None:
-                        uv = v.get(vf.name)
-                        inferred = self._infer_union_type(t.ref, uv, fpath)
-                        if inferred is not None:
-                            items.append((f.id, "B", inferred, 1))
-                continue
-            if base.is_scalar:
-                val = self.scalar(base, t.enum, fv, fpath)     # also maps enum/union type names
-                if not f.optional and not self.force_defaults and val == f.default and not (
-                        isinstance(val, float) and math.copysign(1, val) != math.copysign(1, f.default or 0.0)):
-                    continue
-                items.append((f.id, SCALAR_FORMAT[base], val, SCALAR_SIZE[base]))
-            elif base == BaseType.OBJ and t.ref.is_struct:
-                items.append((f.id, "struct", (self.struct_blob(t.ref, fv, fpath), t.ref.minalign), t.ref.bytesize))
-            elif base == BaseType.STRING:
-                if not isinstance(fv, (str, bytes)):
-                    raise EncodeError(fpath, f"expected a string, got {type(fv).__name__}")
-                items.append((f.id, "offset", self.string(fv, fpath), 4))
-            elif base == BaseType.OBJ:
-                items.append((f.id, "offset", self.table(t.ref, fv, fpath), 4))
-            elif base == BaseType.UNION:
-                tname = f.name + "_type"
-                ut = v.get(tname)
-                if ut is None:
-                    ut = self._infer_union_type(t.ref, fv, fpath)
-                    if ut is None:
-                        raise EncodeError(fpath, f"union value needs {tname} (cannot infer the member type)")
-                elif isinstance(ut, str):
-                    ut = self.enum_from_name(t.ref, ut, fpath + "_type")
-                items.append((f.id, "offset", self.union_value(t.ref, int(ut), fv, fpath), 4))
-            elif base == BaseType.VECTOR:
-                items.append((f.id, "offset", self.vector(obj, f, fv, v, fpath), 4))
-            else:
-                raise EncodeError(fpath, f"cannot encode field type {base.name}")
+            self.field(obj, f, v, items, path)
         return self.b.table(items)
+
+    def check_known(self, obj: Object, v: Mapping, path: str) -> None:
+        unknown = set(v) - set(obj.fields_by_name)
+        if unknown:
+            raise EncodeError(path, f"unknown field(s) for {obj.name}: {sorted(unknown)}")
+
+    def missing(self, path: str, name: str) -> None:
+        raise EncodeError(_fpath(path, name), "required field is missing")
+
+    def string_field(self, value: Any, path: str, name: str) -> int:
+        if not isinstance(value, (str, bytes)):
+            raise EncodeError(_fpath(path, name), f"expected a string, got {type(value).__name__}")
+        try:
+            return self.b.create_string(value, self.share)
+        except UnicodeEncodeError as e:
+            raise EncodeError(_fpath(path, name),
+                              f"string is not valid Unicode ({e.reason} at index {e.start})") from None
+
+    def field(self, obj: Object, f: Field, v: Mapping, items: list, path: str) -> None:
+        """Encode one field of ``v`` into ``items`` (the general case)."""
+        fpath = _fpath(path, f.name)
+        fv = v.get(f.name)
+        t = f.type
+        base = t.base
+        if fv is None:
+            if f.required:
+                raise EncodeError(fpath, "required field is missing")
+            if base == BaseType.UTYPE and t.ref is not None:
+                vf = obj.fields_by_name.get(f.name[:-5]) if f.name.endswith("_type") else None
+                if vf is not None and v.get(vf.name) is not None:
+                    uv = v.get(vf.name)
+                    inferred = self._infer_union_type(t.ref, uv, fpath)
+                    if inferred is not None:
+                        items.append((f.id, "B", inferred, 1))
+            return
+        if base.is_scalar:
+            val = self.scalar(base, t.enum, fv, fpath)     # also maps enum/union type names
+            if not f.optional and not self.force_defaults and val == f.default and not (
+                    isinstance(val, float) and math.copysign(1, val) != math.copysign(1, f.default or 0.0)):
+                return
+            items.append((f.id, SCALAR_FORMAT[base], val, SCALAR_SIZE[base]))
+        elif base == BaseType.OBJ and t.ref.is_struct:
+            items.append((f.id, "struct", (self.struct_blob(t.ref, fv, fpath), t.ref.minalign), t.ref.bytesize))
+        elif base == BaseType.STRING:
+            items.append((f.id, "offset", self.string_field(fv, path, f.name), 4))
+        elif base == BaseType.OBJ:
+            items.append((f.id, "offset", self.table(t.ref, fv, fpath), 4))
+        elif base == BaseType.UNION:
+            tname = f.name + "_type"
+            ut = v.get(tname)
+            if ut is None:
+                ut = self._infer_union_type(t.ref, fv, fpath)
+                if ut is None:
+                    raise EncodeError(fpath, f"union value needs {tname} (cannot infer the member type)")
+            elif isinstance(ut, str):
+                ut = self.enum_from_name(t.ref, ut, fpath + "_type")
+            items.append((f.id, "offset", self.union_value(t.ref, int(ut), fv, fpath), 4))
+        elif base == BaseType.VECTOR:
+            items.append((f.id, "offset", self.vector(obj, f, fv, v, fpath), 4))
+        else:
+            raise EncodeError(fpath, f"cannot encode field type {base.name}")
 
     def _infer_union_type(self, union: Enum, value: Any, path: str) -> int | None:
         from ._reader import TableView
@@ -411,7 +514,7 @@ class _Encoder:
             # As flatc (ForceVectorAlignment to the nested builder's minalign):
             # the nested buffer's start must be as aligned as its contents.
             nested_align = max(8, b.minalign)
-        if isinstance(value, (str, Mapping)):
+        if isinstance(value, (str, Mapping)) or not hasattr(value, "__iter__"):
             raise EncodeError(path, f"expected a sequence for vector {t.describe()}, got {type(value).__name__}")
         if nested is not None and len(value) == 0:
             raise EncodeError(path, "nested flatbuffer must not be empty (omit the field instead)")
@@ -483,6 +586,134 @@ class _Encoder:
             return sorted(value, key=key)
         except TypeError as e:
             raise EncodeError(path, f"cannot sort by key {kf.name}: {e}") from None
+
+
+def _fpath(path: str, name: str) -> str:
+    return f"{path}.{name}" if path else name
+
+
+#: Tables with more fields than this are encoded field by field, not compiled.
+WIDE_TABLE = 256
+_MAX_FLOAT = 3.4028234663852886e38
+
+
+def _int(x: Any) -> int:
+    """Guard for every number interpolated into generated source."""
+    if type(x) is not int:
+        raise TypeError(f"refusing to generate code from non-integer {x!r}")
+    return x
+
+
+def table_encoder(schema: Schema, obj: Object, strict: bool, force_defaults: bool):
+    """Cached ``(encoder, mapping, path) -> table offset`` function for ``obj``.
+
+    The same field semantics as ``_Encoder.field`` in straight-line code:
+    common values (in-range ints, floats, bools, str, nested dicts) take a
+    fast path, anything else goes to the general methods, which do the full
+    checks and raise the same errors. Schema-derived text never enters the
+    source: names and fields are namespace constants, numbers pass _int().
+    """
+    cache = schema.__dict__.setdefault("_encoders", {})
+    key = (obj.name, bool(strict), bool(force_defaults))
+    fn = cache.get(key)
+    if fn is None:
+        fn = cache[key] = _compile_table(obj, bool(strict), bool(force_defaults))
+    return fn
+
+
+def _mask_layout(cache: dict, descs: tuple, mask: int) -> tuple:
+    """Layout for the fields whose bits are set in ``mask`` (bit j = field j)."""
+    lay = _table_layout(tuple(d for j, d in enumerate(descs) if mask >> j & 1))
+    if len(cache) >= 1024:          # bounded, whatever mix of fields the data has
+        cache.clear()
+    cache[mask] = lay
+    return lay
+
+
+def _compile_table(obj: Object, strict: bool, force_defaults: bool):
+    if len(obj.fields) > WIDE_TABLE:
+        # one branch per field: a hostile schema could declare 32k of them
+        return lambda enc, v, path: enc.generic_table(obj, v, path)
+    ns: dict[str, Any] = {"fp": _fpath, "copysign": math.copysign, "OBJ": obj}
+    consts = 0
+
+    def const(value: Any) -> str:
+        nonlocal consts
+        consts += 1
+        ns[f"k{consts}"] = value
+        return f"k{consts}"
+
+    lines = ["def encode_table(enc, v, path):"]
+    if strict:
+        lines += [f"    if not {const(frozenset(obj.fields_by_name))}.issuperset(v):",
+                  "        enc.check_known(OBJ, v, path)"]
+    # Each field has a fixed (id, kind, size, align): the table's layout
+    # depends only on which fields are present, a bitmask m. Values go into
+    # vals in field order; layouts are cached per mask in LAYOUTS.
+    ns["LAYOUTS"] = {}
+    ns["layout"] = _mask_layout
+    descs = []
+    lines += ["    vals = []", "    ap = vals.append", "    get = v.get", "    m = 0"]
+    for j, f in enumerate(obj.fields):
+        t, base = f.type, f.type.base
+        fid = _int(f.id)
+        name = const(f.name)
+        bit = _int(1 << j)
+        if base.is_scalar:
+            descs.append((fid, SCALAR_FORMAT[base], SCALAR_SIZE[base], SCALAR_SIZE[base]))
+        elif base == BaseType.OBJ and t.ref.is_struct:
+            descs.append((fid, "struct", t.ref.bytesize, t.ref.minalign))
+        else:
+            descs.append((fid, "offset", 4, 4))
+        # general method: it appends (id, kind, value, size) when the field is written
+        general = [f"    one = []", f"    enc.field(OBJ, {const(f)}, v, one, path)",
+                   f"    if one:", f"        m |= {bit}", f"        ap(one[0][2])"]
+        if base.is_scalar and base != BaseType.UTYPE:
+            if base == BaseType.BOOL:
+                fast = "type(x) is bool"
+            elif base == BaseType.DOUBLE:
+                fast = "type(x) is float"
+            elif base == BaseType.FLOAT:
+                fast = f"type(x) is float and -{const(_MAX_FLOAT)} <= x <= {const(_MAX_FLOAT)}"
+            else:
+                lo, hi = INT_RANGE[base]
+                fast = f"type(x) is int and {_int(lo)} <= x <= {_int(hi)}"
+            body = [f"        if not ({fast}):",
+                    f"            x = enc.scalar({const(base)}, {const(t.enum)}, x, fp(path, {name}))"]
+            put = f"ap(x); m |= {bit}"
+            if f.optional or force_defaults:
+                body.append(f"        {put}")
+            elif base.is_float:
+                d = const(f.default)
+                sign = const(math.copysign(1, f.default or 0.0))
+                body.append(f"        if not (x == {d} and copysign(1, x) == {sign}):")
+                body.append(f"            {put}")
+            else:
+                body.append(f"        if x != {const(f.default)}:")
+                body.append(f"            {put}")
+        elif base == BaseType.STRING:
+            body = [f"        ap(enc.string_field(x, path, {name})); m |= {bit}"]
+        elif base == BaseType.OBJ and not t.ref.is_struct:
+            body = [f"        ap(enc.table({const(t.ref)}, x, fp(path, {name}))); m |= {bit}"]
+        elif base == BaseType.VECTOR:
+            body = [f"        ap(enc.vector(OBJ, {const(f)}, x, v, fp(path, {name}))); m |= {bit}"]
+        else:
+            lines += general           # structs, unions, union types: the general method
+            continue
+        lines.append(f"    x = get({name})")
+        if f.required:
+            lines += ["    if x is None:", f"        enc.missing(path, {name})"]
+            lines += ["    else:"]
+        else:
+            lines += ["    if x is not None:"]
+        lines += body
+    ns["DESCS"] = tuple(descs)
+    lines += ["    lay = LAYOUTS.get(m)",
+              "    if lay is None:",
+              "        lay = layout(LAYOUTS, DESCS, m)",
+              "    return enc.b.write_table(lay, vals)"]
+    exec(compile("\n".join(lines) + "\n", "<flatview encoder>", "exec"), ns)
+    return ns["encode_table"]
 
 
 def encode(schema: Schema, value: Any, root: str | Object | None = None, *,

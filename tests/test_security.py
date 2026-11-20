@@ -69,6 +69,19 @@ def test_converters_never_embed_schema_names():
     assert list(s.read(data)._asdict()) == [s.objects["A"].fields[0].name]
 
 
+def test_encoders_never_embed_schema_names():
+    # the compiled encoders follow the same rule as the converters
+    s = parse_fbs("table A { v: int; w: string; } root_type A;")
+    s.objects["A"].name = INJECT
+    s.objects["A"].fields[0].name = "x'] = 1; import builtins; builtins.FLATVIEW_PWNED = True; d['"
+    s.objects["A"].fields[1].name = "w\nimport builtins; builtins.FLATVIEW_PWNED = True"
+    s.objects["A"]._by_name = None
+    s.objects["A"].view_class = None
+    names = [f.name for f in s.objects["A"].fields]
+    data = s.encode({names[0]: 5, names[1]: "s"})
+    assert s.read(data)._asdict() == {names[0]: 5, names[1]: "s"}
+
+
 # ---------------------------------------------------------------------------
 # 2. reference amplification
 
@@ -395,6 +408,18 @@ def test_generic_and_compiled_converters_agree(kitchen_schema, monkeypatch, opts
     generic = kitchen_schema.read(data)._asdict(**opts)
     kitchen_schema.__dict__.pop("_converters", None)
     assert generic == compiled
+
+
+def test_wide_table_encoder_is_cheap():
+    import tracemalloc
+    n = 32765
+    s = parse_fbs("table T { " + " ".join(f"f{i}: int;" for i in range(n)) + " } root_type T;")
+    tracemalloc.start()
+    data = s.encode({"f0": 1, f"f{n - 1}": 2})
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    assert s.read(data)._asdict(defaults=False) == {"f0": 1, f"f{n - 1}": 2}
+    assert peak < 64 << 20        # no 32k-branch function compiled
 
 
 def test_generated_code_refuses_non_integers():

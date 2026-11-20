@@ -113,6 +113,30 @@ vectors decode in a single C call; keyed vectors are binary-searched. Whole-tree
 conversion (`_asdict()`) uses a converter compiled per table type, which reads
 each vtable in one call and creates no intermediate view objects.
 
+### Encoding
+
+`benchmarks/bench_encode.py`, best of 2–3 runs, same machine (November 2026).
+Each side starts from its own in-memory form of the whole file: flatview from
+the `_asdict()` dicts (or copying from a view), the official library from its
+unpacked object-API tree (`TableT.Pack` + `Finish`). `json.dumps` of the same
+dicts is there for scale. Every output is decoded again and checked.
+
+| File | flatview, from dicts | flatview, from a view | official `Pack` | `json.dumps` | speed-up |
+|---|---|---|---|---|---|
+| types.fb (150 MB) | 1.51 s | 2.31 s | 4.33 s | 0.57 s | 2.9× |
+| typeDogma.fb (14 MB) | 1.60 s | 2.36 s | 4.46 s | 0.31 s | 2.8× |
+| mapSolarSystems.fb (3 MB) | 0.29 s | 0.37 s | 0.67 s | 0.05 s | 2.3× |
+
+The encoder compiles one function per table, much as the converters do:
+in-range values of the expected type take straight-line code, and anything
+else goes to the general path, which does the full checks and gives the same
+errors. A table's layout (padding, field positions, vtable) depends only on
+which fields are present, so it is cached per pattern and each table is
+written with one `pack_into`. The output is byte-for-byte what the
+field-by-field encoder wrote. Both builders are pure Python, still well
+behind the C-implemented `json.dumps`. "From a view" includes decoding the
+source to dicts first.
+
 ### Against JSON too
 
 `benchmarks/bench_three_way.py`: flatview and the official library read
@@ -178,6 +202,7 @@ uv run python scripts/fetch_sde_examples.py   # fetch SDE files for sde_full tes
 uv run --group bench python benchmarks/bench_vs_official.py
 uv run --group bench python benchmarks/bench_three_way.py   # + stdlib json on the JSONL export
 uv run --group bench python benchmarks/bench_memory.py
+uv run --group bench python benchmarks/bench_encode.py    # encoder vs official Pack
 ```
 
 There are no runtime dependencies (Python ≥ 3.11). Tests that compare with
